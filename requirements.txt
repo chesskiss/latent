@@ -1,0 +1,6 @@
+# python version 3.9 needed
+dynamax
+matplotlib
+pandas
+seaborn
+numpy==1.26.4
