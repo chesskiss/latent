@@ -38,11 +38,7 @@ def normalize(A):
     A = A.at[:, -1].set(1 - jnp.sum(A[:, :-1], axis=1)) #last column is defined
     return A
 
-def perturbation(perturbation_num, epsilon, initial_probs, transition_matrix, emissions_means, emissions_cov):
-    key = jr.PRNGKey(perturbation_num)
-    initial_probs += jr.uniform(key, shape=(true_num_states,))
-    initial_probs = initial_probs / jnp.sum(initial_probs)
-    
+def perturbation(epsilon, transition_matrix, emission_means, emission_covariances):
     rn  = lambda x : np.random.uniform(-x, x)
     p   = rn(epsilon) * jnp.eye(true_num_states) \
         + rn(epsilon) * jnp.roll(jnp.eye(true_num_states), 1, axis=1) \
@@ -51,15 +47,11 @@ def perturbation(perturbation_num, epsilon, initial_probs, transition_matrix, em
     transition_matrix   = jnp.clip(transition_matrix, 0, None) # Ensures non-negativity
     transition_matrix   = normalize(transition_matrix)
 
-    emissions_means += np.random.normal(-epsilon, epsilon, emission_means.shape) 
-
-    emissions_cov   += np.random.normal(0, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
-
-    return initial_probs, transition_matrix, emission_means, emissions_cov
+    # emission_means      += 
 
     
 
-def initial(): 
+def initialize(hmm, epsilon, scale): #TODO model = optional (use the previous transition matrix, etc.)    
     'Specify initial parameters of the HMM' # TODO change to if Model is not set. if set - transition matrix = model.transition, etc.
     key = jr.PRNGKey(0)  # Random seed
     initial_probs = jr.uniform(key, shape=(true_num_states,),  minval=0)
@@ -67,6 +59,8 @@ def initial():
 
     # initial_probs = jnp.ones(true_num_states) / true_num_states
 
+
+    #TODO - create diagonal matrix randomaization
     rn = lambda x : np.random.uniform(-x, x)
     transition_matrix   = (0.80 + rn(epsilon)) * jnp.eye(true_num_states) \
                         + (0.15 + rn(epsilon)) * jnp.roll(jnp.eye(true_num_states), 1, axis=1) \
@@ -82,10 +76,20 @@ def initial():
             jnp.zeros((true_num_states, EMISSION_DIM - 2))
         ])
     emission_covs   = jnp.tile(0.1**2 * jnp.eye(EMISSION_DIM), (true_num_states, 1, 1))
+
+    emission_means  = emission_means + np.random.normal(-epsilon, epsilon, emission_means.shape) 
     
+    perturbation    = np.random.normal(0, epsilon) * jnp.eye(EMISSION_DIM)  
 
+    emission_covs   = emission_covs + perturbation[None, :, :]  # Add to each covariance matrix
 
-    return initial_probs, transition_matrix, emission_means, emission_covs
+    ' so something is wrong with the matrices initialization...'
+    'TODO - replace them all 1 by 1'
+    params, props   = hmm.initialize(initial_probs=initial_probs,
+                                    transition_matrix=transition_matrix,
+                                    emission_means=emission_means,
+                                    emission_covariances=emission_covs)
+    return params, props
 
 
 
@@ -95,10 +99,10 @@ def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
     """
     keys = jr.split(key, NUM_TRIALS)
     sample_many_trials = vmap(model.sample, (None, 0, None), (0, 0))
-    T0_states, emissions = sample_many_trials(
+    T1_states, emissions = sample_many_trials(
         params, keys, NUM_TIMESTEPS
     )
-    return T0_states, emissions
+    return T1_states, emissions
 
 
 
@@ -137,6 +141,7 @@ def plot_m_arr(hmms, EMISSION_DIM, states):
     fig.tight_layout()
     fig.savefig("hmm-params.png")
 
+
 # Helper functions for plotting
 def plot_gaussian_hmm(hmm, params, emissions, states,  title="Emission Distributions", alpha=0.25):
     lim = 1.1 * abs(emissions).max()
@@ -157,6 +162,7 @@ def plot_gaussian_hmm(hmm, params, emissions, states,  title="Emission Distribut
     plt.tight_layout()
     plt.savefig('Gaussian HMM emissions.png')
     plt.show()  # Ensure the plot is displayed
+
 
 
 def plot_gaussian_hmm_data(hmm, params, emissions, states, xlim=None):
@@ -206,20 +212,8 @@ hmm_n = GaussianHMM(2, EMISSION_DIM)
 
 if __name__ == '__main__':
     'Initialize HMMs'
-    initial_probs, transition_matrix, emission_means, emissions_cov = initial()
-    
-    T0, T0_props    = hmm.initialize(initial_probs=initial_probs,
-                                    transition_matrix=transition_matrix,
-                                    emission_means=emission_means,
-                                    emission_covariances=emissions_cov)
-    teacher_num = 1
-    init, trans, means, covs = perturbation(teacher_num, epsilon, 
-                                            initial_probs, 
-                                            transition_matrix, 
-                                            emission_means, 
-                                            emissions_cov)
-    T1, _           = hmm.initialize(initial_probs=init, transition_matrix=trans,
-                                    emission_means=means, emission_covariances=covs)
+    T1, T1_props    = initialize(hmm, 0,0)
+    T2, _           = initialize(hmm, epsilon, scale)
     S0, S0_props    = hmm.initialize(jr.PRNGKey(0))
 
     'Baseline option 1'
@@ -238,57 +232,57 @@ if __name__ == '__main__':
 
     'Generate datasets'
     gdata   = lambda params, key: generate_data_from_model(hmm, params, jr.PRNGKey(key), NUM_TRIALS, NUM_TIMESTEPS)
-    _, T0_emissions_train           = gdata(T0, 1)
-    T0_states, T0_emissions_test    = gdata(T0, 1000)
     _, T1_emissions_train           = gdata(T1, 1)
     T1_states, T1_emissions_test    = gdata(T1, 1000)
-    teachers = [[T0, T0_emissions_train, T0_emissions_test], [T1, T1_emissions_train, T1_emissions_test], [T0, T0_emissions_train, T0_emissions_train]]
+    _, T2_emissions_train           = gdata(T2, 1)
+    T2_states, T2_emissions_test    = gdata(T2, 1000)
+    teachers = [[T1, T1_emissions_train, T1_emissions_test], [T2, T2_emissions_train, T2_emissions_test], [T1, T1_emissions_train, T1_emissions_train]]
 
 
     # Plot emissions and true_states in the emissions plane
-    # plot_gaussian_hmm(hmm, T0, T0_emissions_test[0], T0_states[0], title="True HMM emission distribution")
+    # plot_gaussian_hmm(hmm, T1, T1_emissions_test[0], T1_states[0], title="True HMM emission distribution")
 
     # Plot emissions vs. time with background colored by true state
-    # plot_gaussian_hmm_data(hmm, T0, T0_emissions_test[0], T0_states[0])
+    # plot_gaussian_hmm_data(hmm, T1, T1_emissions_test[0], T1_states[0])
 
-    # hmm.fit_em(S0, S0_props, T0_emissions_train)
-    print('shape = checkpoint', T0_emissions_train.shape)
+    # hmm.fit_em(S0, S0_props, T1_emissions_train)
+    print('shape = checkpoint', T1_emissions_train.shape)
 
     #TODO - sum over all 100x100x3 ? over all 3 emissions dimensions?
     'Train'
     fit         = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions) #TODO why it doesn't find it again?? Add to instructions to VIB! also add NUM_EPOCHS=NUM_EPOCHS
-    S0, losses  = fit(hmm, S0, S0_props, T0_emissions_train)
-    S1, _       = fit(hmm, S0, S0_props, T1_emissions_train)
-    S01, _      = fit(hmm, S0, S0_props, T1_emissions_train)
-    S01, _      = fit(hmm, S1, S0_props, T1_emissions_train)
-    T01, _      = fit(hmm, T0, T0_props, T1_emissions_train)
-    S_l1, _     = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
+    S1, losses  = fit(hmm, S0, S0_props, T1_emissions_train)
+    S2, _       = fit(hmm, S0, S0_props, T2_emissions_train)
+    S12, _      = fit(hmm, S1, S0_props, T2_emissions_train)
+    S22, _      = fit(hmm, S2, S0_props, T2_emissions_train)
+    T12, _      = fit(hmm, T1, T1_props, T2_emissions_train)
+    S_l1, _     = fit(hmm_n, S_l, S_l_props, T1_emissions_train)
 
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
 
     params = [
-        ["T0 (Ground truth)",   T0 , hmm],
-        ["T1 (Perturbated)",    T1 , hmm],
+        ["T1 (Ground truth)",   T1 , hmm],
+        ["T2 (Perturbated)",    T2 , hmm],
         ["S0 (initial student)",S0 , hmm],
-        ["S0",                  S0 , hmm],
         ["S1",                  S1 , hmm],
-        ["S01",                 S01, hmm],
-        ["S01",                 S01, hmm],
-        ["True trained",        T01, hmm],
+        ["S2",                  S2 , hmm],
+        ["S12",                 S12, hmm],
+        ["S22",                 S22, hmm],
+        ["True trained",        T12, hmm],
         ["S_l",                 S_l, hmm_n],
         ["S_l1",                S_l1, hmm_n]
     ] #TODO remove initial student if less than 0/baseline or certain value.
-    results = {"Likelihood over" : ["T0", "T1", "over train T0"]}
+    results = {"Likelihood over" : ["T1", "T2", "over train T1"]}
 
-    results_unormalized = {"Likelihood over" : ["T0", "T1", "over train T0"]}
+    results_unormalized = {"Likelihood over" : ["T1", "T2", "over train T1"]}
 
     removed = []
 
     for T, train, test in teachers:
             print(f'base  = {base(train, test)}')
             # print(f' init = {ev(hmm,S0,test)}')
-            # print(f' S0 = {ev(hmm, S0, test)}')
+            # print(f' S1 = {ev(hmm, S1, test)}')
             # print(f' T = {ev(hmm, T, test)}')
             # print((ev_l(S_l1, test, hmm_n)-base(train, test))/(ev(T, test)-base(train, test)))
     # results['base'] = [base(train, test)  for T, train, test in teachers]
@@ -297,10 +291,12 @@ if __name__ == '__main__':
 
     for key, model, hmm_type in params:
         results[key] = [(ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test)) for T, train, test in teachers] #TODO change it back to minus
-        results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
+        results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] #TODO change it back to minus
+        # results[key] = [ev(hmm_type, model, test) for T, train, test in teachers] #TODO change it back to minus
         if max(results[key])<0:
             del results[key]
             removed.append(key)
+    #TODO normal scaling like in LSTM project encoder
 
     df1 = pd.DataFrame(results)
     df2 = pd.DataFrame(results_unormalized)
@@ -324,15 +320,15 @@ if __name__ == '__main__':
 
 
     # for i in range(5):
-    #     student_states_trained_perturbed = hmm.most_likely_states(peterbuted_student_params_trained, T0_emissions_test[i])
-    #     student_states_trained = hmm.most_likely_states(student_params_trained, T0_emissions_test[i])
-    #     student_states_initial = hmm.most_likely_states(student_params_initial, T0_emissions_test[i])
+    #     student_states_trained_perturbed = hmm.most_likely_states(peterbuted_student_params_trained, T1_emissions_test[i])
+    #     student_states_trained = hmm.most_likely_states(student_params_trained, T1_emissions_test[i])
+    #     student_states_initial = hmm.most_likely_states(student_params_initial, T1_emissions_test[i])
     #     print('trial = ', i)
     #     print('student initial ', student_states_initial)
     #     print('student trained ', student_states_trained)
     #     print('student perturbed trained ', student_states_trained_perturbed)
-    #     print('teacher ', T0_states[i])
-    # params = [T0, student_params_initial, student_params_trained]
+    #     print('teacher ', T1_states[i])
+    # params = [T1, student_params_initial, student_params_trained]
 
 
     # plot_m_arr(params, EMISSION_DIM, true_num_states)
