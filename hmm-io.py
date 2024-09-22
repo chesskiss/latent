@@ -57,7 +57,7 @@ def perturbation(perturbation_num, epsilon, initial_probs, transition_matrix, em
     emissions_means += np.random.normal(-epsilon, epsilon, emission_means.shape) 
     emissions_cov   += np.random.normal(0, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
     emissions_cov   += np.random.normal(-epsilon, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
-    emissions_cov = (emissions_cov + np.swapaxes(emissions_cov, -2, -1)) / 2 #Create PSD part 1 : ( A + A.T )/ 2
+    emissions_cov   = (emissions_cov + np.swapaxes(emissions_cov, -2, -1)) / 2 #Create PSD part 1 : ( A + A.T )/ 2
     # Create PSD part 2 : Make diagonal absolute value:
     abs_diags = jnp.abs(jnp.diagonal(emissions_cov, axis1=-2, axis2=-1))
     mask = jnp.eye(emissions_cov.shape[-1]).astype(bool) #Mask 
@@ -201,6 +201,7 @@ NUM_TEST_BATCHS    = 1
 NUM_EPOCHS          = 100000
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
+STUDENTS_NUM        = 100
 epsilon             = 0.1
 scale               = 0.1
 
@@ -240,7 +241,9 @@ if __name__ == '__main__':
                                     emission_means=means, emission_covariances=covs)
     
 
-    S, S_props    = hmm.initialize(jr.PRNGKey(1000))
+    S, S_props = hmm.initialize(jr.PRNGKey(1000)) 
+    # students_init   = [hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)]
+    # S, S_props = zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
 
     'Baseline option 1'
     # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
@@ -263,23 +266,21 @@ if __name__ == '__main__':
     _, T1_emissions_train           = gdata(T1, 1)
     T1_states, T1_emissions_test    = gdata(T1, 100)
     _, T2_emissions_train           = gdata(T2, 1)
-    T1_states, T1_emissions_test    = gdata(T2, 100)
-    teachers = [[T0, T0_emissions_train, T0_emissions_test], [T1, T1_emissions_train, T1_emissions_test], [T2, T2_emissions_train, T2_emissions_train]]
+    T2_states, T2_emissions_test    = gdata(T2, 100)
+    teachers = [[T0, T0_emissions_train, T0_emissions_test], [T1, T1_emissions_train, T1_emissions_test], [T2, T2_emissions_train, T2_emissions_test]]
 
 
-    # Plot emissions and true_states in the emissions plane
+    'Plot emissions and true_states in the emissions plane'
     # plot_gaussian_hmm(hmm, T0, T0_emissions_test[0], T0_states[0], title="True HMM emission distribution")
 
-    # Plot emissions vs. time with background colored by true state
+    'Plot emissions vs. time with background colored by true state'
     # plot_gaussian_hmm_data(hmm, T0, T0_emissions_test[0], T0_states[0])
 
-    # hmm.fit_em(S0, S0_props, T0_emissions_train)
-    print('shape = checkpoint', T0_emissions_train.shape)
 
-    #TODO - sum over all 100x100x3 ? over all 3 emissions dimensions?
+
     'Train'
-    fit         = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions) #TODO why it doesn't find it again?? Add to instructions to VIB! also add NUM_EPOCHS=NUM_EPOCHS
-    S0, losses  = fit(hmm, S, S_props, T0_emissions_train)
+    fit  = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions) #TODO add NUM_EPOCHS=NUM_EPOCHS
+    S0, _   = fit(hmm, S, S_props, T0_emissions_train)
     S1, _       = fit(hmm, S, S_props, T1_emissions_train)
     S00, _      = fit(hmm, S0, S_props, T0_emissions_train)
     S01, _      = fit(hmm, S0, S_props, T1_emissions_train)
@@ -291,16 +292,16 @@ if __name__ == '__main__':
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
 
     params = [
-        ["T0",  T0 , hmm],
-        ["T1",  T1 , hmm],
-        ["T2",  T2 , hmm],
-        ["S",   S , hmm],
-        ["S0",  S0 , hmm],
-        ["S1",  S1 , hmm],
+        ["T0" , T0 , hmm],
+        ["T1" , T1 , hmm],
+        ["T2" , T2 , hmm],
+        ["S"  , S  , hmm],
+        ["S0" , S0 , hmm],
+        ["S1" , S1 , hmm],
         ["S00", S00, hmm],
         ["S01", S01, hmm],
         ["S11", S11, hmm],
-        ["T1",  T01, hmm],
+        ["T01" , T01, hmm],
         ["S_l", S_l, hmm_n],
         ["S_l0",S_l0, hmm_n]
     ]
@@ -310,16 +311,27 @@ if __name__ == '__main__':
 
     results_unormalized = {"Likelihood over" : ["T0", "T1", "T2"]}
 
+
+    # for key, model, hmm_type in params:
+    #         for T, train, test in teachers:
+    #             print((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test)))
+            # print(f'base  = {base(train, test)}')
+            # print(f' init = {ev(hmm,S0,test)}')
+            # print(f' S0 = {ev(hmm, S0, test)}')
+            # print(f' T = {ev(hmm, T, test)}')
+            # print((ev_l(S_l1, test, hmm_n)-base(train, test))/(ev(T, test)-base(train, test)))
+    # results['base'] = [base(train, test)  for T, train, test in teachers]
+
+
+
     removed = []
-
-
     for key, model, hmm_type in params:
-        results[key] = [(ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test)) for T, train, test in teachers] #TODO change it back to minus
+        results[key] = [(ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test)) for T, train, test in teachers] 
         results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
         if max(results[key])<0:
             del results[key]
             removed.append(key)
-
+    
     df1 = pd.DataFrame(results)
     df2 = pd.DataFrame(results_unormalized)
 
@@ -341,13 +353,6 @@ if __name__ == '__main__':
     df.to_csv('Params likelihood.csv', sep='\t')
 
 
-    for T, train, test in teachers:
-            print(f'base  = {base(train, test)}')
-            # print(f' init = {ev(hmm,S0,test)}')
-            # print(f' S0 = {ev(hmm, S0, test)}')
-            # print(f' T = {ev(hmm, T, test)}')
-            # print((ev_l(S_l1, test, hmm_n)-base(train, test))/(ev(T, test)-base(train, test)))
-    # results['base'] = [base(train, test)  for T, train, test in teachers]
 
     # for i in range(5):
     #     student_states_trained_perturbed = hmm.most_likely_states(peterbuted_student_params_trained, T0_emissions_test[i])
@@ -365,10 +370,8 @@ if __name__ == '__main__':
 
 '''
 TODO
-0. !!! Copy Khabir's codev(from paper). If not, then dynamax.  
-
-1. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) V
-1.1 Evaluate all on unseen teacher T3 V
+0. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
+1. Evaluate all on unseen teacher T3 V
 2. Repeating each curriculum with many randomly initialized students.
 3. Visualize results: Use rings on teacher's data, and graph the dataframe's data 
 4. ! Plan/compute algo for generalizing students (s_1..1,s_1..2...?) for 5 teachers (T5) - combinatorics computation:
