@@ -30,6 +30,8 @@ from sklearn.preprocessing import StandardScaler
 
 from sklearn.mixture import GaussianMixture 
 
+from visualize import *
+
 
 #TODO normalize rows/columns only, depending on j/i
 def normalize(A):
@@ -201,7 +203,7 @@ NUM_TEST_BATCHS    = 1
 NUM_EPOCHS          = 100000
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
-STUDENTS_NUM        = 100
+STUDENTS_NUM        = 2
 epsilon             = 0.1
 scale               = 0.1
 
@@ -241,9 +243,9 @@ if __name__ == '__main__':
                                     emission_means=means, emission_covariances=covs)
     
 
-    S, S_props = hmm.initialize(jr.PRNGKey(1000)) 
+    # S, S_props = hmm.initialize(jr.PRNGKey(1000)) 
     # students_init   = [hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)]
-    # S, S_props = zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+    S, S_props = zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
 
     'Baseline option 1'
     # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
@@ -279,17 +281,20 @@ if __name__ == '__main__':
 
 
     'Train'
-    fit  = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions) #TODO add NUM_EPOCHS=NUM_EPOCHS
-    S0, _   = fit(hmm, S, S_props, T0_emissions_train)
-    S1, _       = fit(hmm, S, S_props, T1_emissions_train)
-    S00, _      = fit(hmm, S0, S_props, T0_emissions_train)
-    S01, _      = fit(hmm, S0, S_props, T1_emissions_train)
-    S11, _      = fit(hmm, S1, S_props, T1_emissions_train)
-    T01, _      = fit(hmm, T0, T0_props, T1_emissions_train)
-    S_l0, _     = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
+    # def fit(hmm_class, params, props, emissions):
+    #     return [hmm_class.fit_em(params, props, emissions) for params, props in zip(params, props)] #TODO add NUM_EPOCHS=NUM_EPOCHS
+    fit = lambda hmm_class, params, props, emissions: [hmm_class.fit_em(p, pr, emissions)[0] for p, pr in zip(params, props)]
+    S0  = fit(hmm, S, S_props, T0_emissions_train)
+    S1  = fit(hmm, S, S_props, T1_emissions_train)
+    S00 = fit(hmm, S0, S_props, T0_emissions_train)
+    S01 = fit(hmm, S0, S_props, T1_emissions_train)
+    S11 = fit(hmm, S1, S_props, T1_emissions_train)
+    # T01 = fit(hmm, T0, T0_props, T1_emissions_train)
+    # S_l0 = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
 
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
+
 
     params = [
         ["T0" , T0 , hmm],
@@ -301,9 +306,9 @@ if __name__ == '__main__':
         ["S00", S00, hmm],
         ["S01", S01, hmm],
         ["S11", S11, hmm],
-        ["T01" , T01, hmm],
-        ["S_l", S_l, hmm_n],
-        ["S_l0",S_l0, hmm_n]
+        # ["T01" , T01, hmm],
+        # ["S_l", S_l, hmm_n],
+        # ["S_l0",S_l0, hmm_n]
     ]
 
     #TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
@@ -323,10 +328,14 @@ if __name__ == '__main__':
     # results['base'] = [base(train, test)  for T, train, test in teachers]
 
 
-
     removed = []
-    for key, model, hmm_type in params:
-        results[key] = [(ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test)) for T, train, test in teachers] 
+    for key, models, hmm_type in params:
+        for T, train, test in teachers:
+            likelihood = 0
+            for model in models:
+                likelihood += (ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))
+            likelihood = likelihood/len(models)
+            results[key].append(likelihood)
         results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
         if max(results[key])<0:
             del results[key]
@@ -351,6 +360,7 @@ if __name__ == '__main__':
     # rownames(df) <- c("Likelihood") 
     print(df)
     df.to_csv('Params likelihood.csv', sep='\t')
+    plot(df)
 
 
 
@@ -369,6 +379,18 @@ if __name__ == '__main__':
     # plot_m_arr(params, EMISSION_DIM, true_num_states)
 
 '''
+TODO - Visualization options:
+- Axises = normalized performances on teachers (Q0= performance on T0, Q1, Q2 similarly)
+- 
+
+
+TODO presentation - 
+- motivation
+- Use specifications paper, descriptions, experimantal framework student-teacher etc.
+- add all Visualizations
+- what have I done
+- what should I do next (plan) 
+
 TODO
 0. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
 1. Evaluate all on unseen teacher T3 V
