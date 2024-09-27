@@ -116,7 +116,7 @@ NUM_TEST_BATCHS    = 1
 NUM_EPOCHS          = 100000
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
-STUDENTS_NUM        = 100
+STUDENTS_NUM        = 2
 epsilon             = 0.1
 scale               = 0.1
 
@@ -194,14 +194,14 @@ if __name__ == '__main__':
 
 
     'Train'
-    fit  = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions) #TODO add NUM_EPOCHS=NUM_EPOCHS
-    S0, _       = fit(hmm, S, S_props, T0_emissions_train)
-    S1, _       = fit(hmm, S, S_props, T1_emissions_train)
-    S00, _      = fit(hmm, S0, S_props, T0_emissions_train)
-    S01, _      = fit(hmm, S0, S_props, T1_emissions_train)
-    S11, _      = fit(hmm, S1, S_props, T1_emissions_train)
-    T01, _      = fit(hmm, T0, T0_props, T1_emissions_train)
-    S_l0, _     = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
+    fit = lambda hmm_class, params, props, emissions : [hmm_class.fit_em(param, prop, emissions) for param, prop in zip(params, props)] #TODO add NUM_EPOCHS=NUM_EPOCHS
+    S0, _   = fit(hmm, S, S_props, T0_emissions_train)
+    S1, _   = fit(hmm, S, S_props, T1_emissions_train)
+    S00, _  = fit(hmm, S0, S_props, T0_emissions_train)
+    S01, _  = fit(hmm, S0, S_props, T1_emissions_train)
+    S11, _  = fit(hmm, S1, S_props, T1_emissions_train)
+    T01, _  = fit(hmm, T0, T0_props, T1_emissions_train)
+    S_l0, _ = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
 
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
@@ -241,12 +241,13 @@ if __name__ == '__main__':
 
 
     removed = []
-    for key, model, hmm_type in params:
-        results[key] = [float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers] 
-        # results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
-        if max(results[key])<0:
-            del results[key]
-            removed.append(key)
+    for key, models, hmm_type in params:
+        for model in models:
+            results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers])
+            # results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
+            if max(results[key])<0:
+                del results[key]
+                removed.append(key)
     
     df1 = pd.DataFrame(results)
     # df2 = pd.DataFrame(results_unormalized)
