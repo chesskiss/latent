@@ -17,18 +17,15 @@ from functools import partial
 from jax import vmap
 import jax.numpy as jnp
 import jax.random as jr
-import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 
+from sklearn.mixture import GaussianMixture 
 from dynamax.hidden_markov_model import GaussianHMM
 from dynamax.hidden_markov_model import DiagonalGaussianHMM
 from dynamax.hidden_markov_model import SphericalGaussianHMM
 from dynamax.hidden_markov_model import SharedCovarianceGaussianHMM
-from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
-from sklearn.preprocessing import StandardScaler
 
 
-from sklearn.mixture import GaussianMixture 
 
 from visualize import *
 
@@ -99,6 +96,7 @@ def initial():
     return initial_probs, transition_matrix, emission_means, emission_covs
 
 
+
 def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
     """
     Sample many trials. 
@@ -112,98 +110,13 @@ def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
 
 
 
-def plot_m_arr(hmms, EMISSION_DIM, states):
-    fig, axs = plt.subplots(len(hmms), 3)
-
-    # fig = plt.figure()
-    # axs = fig.add_subplot(111, projection='3d')
-
-    for i, hmm_matrix in enumerate(hmms):
-        ######## Tranisition matrix Aij ########
-        A = hmm_matrix.transitions.transition_matrix
-
-        im = axs[i,0].imshow(A) #(x, y, z)
-        fig.colorbar(im, ax= axs[i,0], label='Amplitude')
-        axs[i,0].set_title('Tranisition matrix Aij')
-
-        ######## Emmission matrix Bij ########
-        B = hmm_matrix.emissions.means
-
-
-        im = axs[i,1].imshow(B)
-        fig.colorbar(im, ax= axs[i,1], label='Amplitude')
-        axs[i,1].set_title('Emmission matrix Bij')
-
-
-        ######## Initial states distribution ########
-        initial_dist = hmm_matrix.initial.probs
-        states = range(len(initial_dist))
-
-        axs[i,2].bar(states, initial_dist)
-        axs[i,2].set_title('Initial distributions')
-
-        ########################################
-    # Adjust layout to prevent overlap
-    fig.tight_layout()
-    fig.savefig("hmm-params.png")
-
-# Helper functions for plotting
-def plot_gaussian_hmm(hmm, params, emissions, states,  title="Emission Distributions", alpha=0.25):
-    lim = 1.1 * abs(emissions).max()
-    XX, YY = jnp.meshgrid(jnp.linspace(-lim, lim, 100), jnp.linspace(-lim, lim, 100))
-    grid = jnp.column_stack((XX.ravel(), YY.ravel()))
-
-    plt.figure()
-    for k in range(hmm.num_states):
-        lls = hmm.emission_distribution(params, k).log_prob(grid)
-        plt.contour(XX, YY, jnp.exp(lls).reshape(XX.shape), cmap=white_to_color_cmap(COLORS[k]))
-        plt.plot(emissions[states == k, 0], emissions[states == k, 1], "o", mfc=COLORS[k], mec="none", ms=3, alpha=alpha)
-
-    plt.plot(emissions[:, 0], emissions[:, 1], "-k", lw=1, alpha=alpha)
-    plt.xlabel("$y_1$")
-    plt.ylabel("$y_2$")
-    plt.title(title)
-    plt.gca().set_aspect(1.0)
-    plt.tight_layout()
-    plt.savefig('Gaussian HMM emissions.png')
-    plt.show()  # Ensure the plot is displayed
-
-
-def plot_gaussian_hmm_data(hmm, params, emissions, states, xlim=None):
-    NUM_TIMESTEPS = len(emissions)
-    EMISSION_DIM = hmm.EMISSION_DIM
-    means = params.emissions.means[states]
-    lim = 1.05 * abs(emissions).max()
-
-    # Plot the data superimposed on the generating state sequence
-    fig, axs = plt.subplots(EMISSION_DIM, 1, sharex=True)
-    
-    for d in range(EMISSION_DIM):    
-        axs[d].imshow(states[None, :], aspect="auto", interpolation="none", cmap=CMAP,
-                      vmin=0, vmax=len(COLORS) - 1, extent=(0, NUM_TIMESTEPS, -lim, lim))
-        axs[d].plot(emissions[:, d], "-k")
-        axs[d].plot(means[:, d], ":k")
-        axs[d].set_ylabel("$y_{{t,{} }}$".format(d+1))
-        
-    if xlim is None:
-        plt.xlim(0, NUM_TIMESTEPS)
-    else:
-        plt.xlim(xlim)
-
-    axs[-1].set_xlabel("time")
-    axs[0].set_title("Simulated data from an HMM")
-    plt.tight_layout()
-    plt.show()  # Ensure the plot is displayed
-
-
-
 NUM_TRAIN_BATCHS  = 3
 NUM_TEST_BATCHS    = 1
 
 NUM_EPOCHS          = 100000
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
-STUDENTS_NUM        = 2
+STUDENTS_NUM        = 100
 epsilon             = 0.1
 scale               = 0.1
 
@@ -281,20 +194,17 @@ if __name__ == '__main__':
 
 
     'Train'
-    # def fit(hmm_class, params, props, emissions):
-    #     return [hmm_class.fit_em(params, props, emissions) for params, props in zip(params, props)] #TODO add NUM_EPOCHS=NUM_EPOCHS
-    fit = lambda hmm_class, params, props, emissions: [hmm_class.fit_em(p, pr, emissions)[0] for p, pr in zip(params, props)]
-    S0  = fit(hmm, S, S_props, T0_emissions_train)
-    S1  = fit(hmm, S, S_props, T1_emissions_train)
-    S00 = fit(hmm, S0, S_props, T0_emissions_train)
-    S01 = fit(hmm, S0, S_props, T1_emissions_train)
-    S11 = fit(hmm, S1, S_props, T1_emissions_train)
-    # T01 = fit(hmm, T0, T0_props, T1_emissions_train)
-    # S_l0 = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
+    fit  = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions) #TODO add NUM_EPOCHS=NUM_EPOCHS
+    S0, _       = fit(hmm, S, S_props, T0_emissions_train)
+    S1, _       = fit(hmm, S, S_props, T1_emissions_train)
+    S00, _      = fit(hmm, S0, S_props, T0_emissions_train)
+    S01, _      = fit(hmm, S0, S_props, T1_emissions_train)
+    S11, _      = fit(hmm, S1, S_props, T1_emissions_train)
+    T01, _      = fit(hmm, T0, T0_props, T1_emissions_train)
+    S_l0, _     = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
 
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
-
 
     params = [
         ["T0" , T0 , hmm],
@@ -306,10 +216,11 @@ if __name__ == '__main__':
         ["S00", S00, hmm],
         ["S01", S01, hmm],
         ["S11", S11, hmm],
-        # ["T01" , T01, hmm],
-        # ["S_l", S_l, hmm_n],
-        # ["S_l0",S_l0, hmm_n]
+        ["T01" , T01, hmm],
+        ["S_l", S_l, hmm_n],
+        ["S_l0",S_l0, hmm_n]
     ]
+
 
     #TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
     results = {"Likelihood over" : ["T0", "T1", "T2"]}
@@ -328,41 +239,31 @@ if __name__ == '__main__':
     # results['base'] = [base(train, test)  for T, train, test in teachers]
 
 
+
     removed = []
-    for key, models, hmm_type in params:
-        for T, train, test in teachers:
-            likelihood = 0
-            for model in models:
-                likelihood += (ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))
-            likelihood = likelihood/len(models)
-            results[key].append(likelihood)
-        results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
+    for key, model, hmm_type in params:
+        results[key] = [float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers] 
+        # results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
         if max(results[key])<0:
             del results[key]
             removed.append(key)
     
     df1 = pd.DataFrame(results)
-    df2 = pd.DataFrame(results_unormalized)
+    # df2 = pd.DataFrame(results_unormalized)
 
-    df = pd.concat([df1, df2])
+    # df = pd.concat([df1, df2])
+    df=df1
 
-    # (X - E(X))/σ(X)
-    '''numeric_columns = df.select_dtypes(include=[np.number]).columns
-    numeric_data = df[numeric_columns]
-    print(numeric_columns)
-
-    std_scale = StandardScaler()
-    scaled_data = std_scale.fit_transform(numeric_data)
-
-    df[numeric_columns] = scaled_data'''
+    df.to_csv('Params likelihood.csv')
 
     print(f'\nRemoved models with low performance: {removed}')
-    # rownames(df) <- c("Likelihood") 
-    print(df)
-    df.to_csv('Params likelihood.csv', sep='\t')
-    plot(df)
+
+    df = nullify_negative(df)
+    visualize(df)
 
 
+
+    
 
     # for i in range(5):
     #     student_states_trained_perturbed = hmm.most_likely_states(peterbuted_student_params_trained, T0_emissions_test[i])
@@ -379,18 +280,6 @@ if __name__ == '__main__':
     # plot_m_arr(params, EMISSION_DIM, true_num_states)
 
 '''
-TODO - Visualization options:
-- Axises = normalized performances on teachers (Q0= performance on T0, Q1, Q2 similarly)
-- 
-
-
-TODO presentation - 
-- motivation
-- Use specifications paper, descriptions, experimantal framework student-teacher etc.
-- add all Visualizations
-- what have I done
-- what should I do next (plan) 
-
 TODO
 0. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
 1. Evaluate all on unseen teacher T3 V
