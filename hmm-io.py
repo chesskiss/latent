@@ -110,10 +110,12 @@ def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
 
 
 
+
+
 NUM_TRAIN_BATCHS  = 3
 NUM_TEST_BATCHS    = 1
 
-NUM_EPOCHS          = 100000
+NUM_EPOCHS          = 3
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
 STUDENTS_NUM        = 2
@@ -160,6 +162,7 @@ if __name__ == '__main__':
     # students_init   = [hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)]
     S, S_props = zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
 
+
     'Baseline option 1'
     # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
     # base    = lambda train, test : np.log(n(train, test)).sum(axis=1).mean(axis=0)
@@ -171,8 +174,8 @@ if __name__ == '__main__':
                 test.reshape(-1, EMISSION_DIM)
             ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
 
-    S_l, S_l_props= hmm_n.initialize(jr.PRNGKey(1000))
-
+    # S_l, S_l_props= hmm_n.initialize(jr.PRNGKey(1000))
+    S_l, S_l_props = zip(*[hmm_n.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
 
     'Generate datasets'
     gdata   = lambda params, key: generate_data_from_model(hmm, params, jr.PRNGKey(key), NUM_TRIALS, NUM_TIMESTEPS)
@@ -194,38 +197,40 @@ if __name__ == '__main__':
 
 
     'Train'
-    fit = lambda hmm_class, params, props, emissions : [hmm_class.fit_em(param, prop, emissions) for param, prop in zip(params, props)] #TODO add NUM_EPOCHS=NUM_EPOCHS
+    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions, num_iters=NUM_EPOCHS) for param, prop in zip(*[params, props])])
+    # single_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=NUM_EPOCHS)
+
     S0, _   = fit(hmm, S, S_props, T0_emissions_train)
     S1, _   = fit(hmm, S, S_props, T1_emissions_train)
     S00, _  = fit(hmm, S0, S_props, T0_emissions_train)
     S01, _  = fit(hmm, S0, S_props, T1_emissions_train)
     S11, _  = fit(hmm, S1, S_props, T1_emissions_train)
-    T01, _  = fit(hmm, T0, T0_props, T1_emissions_train)
+    # T01, _  = single_fit(hmm, T0, T0_props, T1_emissions_train)
     S_l0, _ = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
 
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
 
     params = [
-        ["T0" , T0 , hmm],
-        ["T1" , T1 , hmm],
-        ["T2" , T2 , hmm],
+        # ["T0" , T0 , hmm],
+        # ["T1" , T1 , hmm],
+        # ["T2" , T2 , hmm], 
         ["S"  , S  , hmm],
         ["S0" , S0 , hmm],
         ["S1" , S1 , hmm],
         ["S00", S00, hmm],
         ["S01", S01, hmm],
         ["S11", S11, hmm],
-        ["T01" , T01, hmm],
+        # ["T01" , T01, hmm],
         ["S_l", S_l, hmm_n],
         ["S_l0",S_l0, hmm_n]
     ]
 
 
     #TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
-    results = {"Likelihood over" : ["T0", "T1", "T2"]}
+    likelihood_title = "Likelihood over"
+    results = {likelihood_title : ["T0", "T1", "T2"]}
 
-    results_unormalized = {"Likelihood over" : ["T0", "T1", "T2"]}
 
 
     # for key, model, hmm_type in params:
@@ -242,25 +247,65 @@ if __name__ == '__main__':
 
     removed = []
     for key, models, hmm_type in params:
+        results[key] = []
         for model in models:
             results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers])
-            # results_unormalized[key] = [ev(hmm_type, model, test) for _, _, test in teachers] 
-            if max(results[key])<0:
-                del results[key]
-                removed.append(key)
-    
-    df1 = pd.DataFrame(results)
-    # df2 = pd.DataFrame(results_unormalized)
+            
+            # if max(results[key])<0:
+            #     print(results[key])
+            #     del results[key]
+            #     removed.append(key)
 
-    # df = pd.concat([df1, df2])
-    df=df1
+
+    # for key in results:
+    #     for model_result in results[key]:
+    #         print(model_result)
+
+    removed = []
+    keys_to_remove = []
+
+    for key, value in results.items():
+        if key == 'Likelihood over':
+            continue  # Skip the header row
+        
+        if isinstance(value[0], list):  # Check if the value is a list of lists
+            if all(max(sublist) < 0 for sublist in value):
+                keys_to_remove.append(key)
+        else:  # If it's a list of numbers
+            if max(value) < 0:
+                keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        del results[key]
+        removed.append(key)
+
+    
+    
+
+    normalized_data = {}
+    for key, value in results.items():
+        if isinstance(value[0], list):
+            # If it's a list of lists, we'll create separate columns for each sublist
+            for i, sublist in enumerate(value):
+                normalized_data[f"{key}_{i}"] = sublist
+        else:
+            normalized_data[key] = value
+
+    # Now create the DataFrame
+    df = pd.DataFrame(normalized_data)
+
+    # Set the 'Likelihood over' column as the index if you want
+    df.set_index('Likelihood over', inplace=True)
+    print(df)
+
+
 
     df.to_csv('Params likelihood.csv')
 
     print(f'\nRemoved models with low performance: {removed}')
 
-    df = nullify_negative(df)
-    visualize(df)
+    # df = nullify_negative(df)
+    # visualize(df)
 
 
 
