@@ -26,7 +26,6 @@ from dynamax.hidden_markov_model import SphericalGaussianHMM
 from dynamax.hidden_markov_model import SharedCovarianceGaussianHMM
 
 
-
 from visualize import *
 
 
@@ -54,8 +53,8 @@ def perturbation(perturbation_num, epsilon, initial_probs, transition_matrix, em
     transition_matrix   = normalize(transition_matrix)
 
     emissions_means += np.random.normal(-epsilon, epsilon, emission_means.shape) 
-    emissions_cov   += np.random.normal(0, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
-    emissions_cov   += np.random.normal(-epsilon, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
+    emissions_cov   += np.random.normal(0, epsilon) * jnp.eye(emission_dim)[None, :, :]
+    emissions_cov   += np.random.normal(-epsilon, epsilon) * jnp.eye(emission_dim)[None, :, :]
     emissions_cov   = (emissions_cov + np.swapaxes(emissions_cov, -2, -1)) / 2 #Create PSD part 1 : ( A + A.T )/ 2
     # Create PSD part 2 : Make diagonal absolute value:
     abs_diags = jnp.abs(jnp.diagonal(emissions_cov, axis1=-2, axis2=-1))
@@ -87,9 +86,9 @@ def initial():
     emission_means = jnp.column_stack([
             0.1*jnp.cos(jnp.linspace(0, 2 * jnp.pi, true_num_states + 1))[:-1],
             0.*jnp.sin(jnp.linspace(0, 2 * jnp.pi, true_num_states + 1))[:-1],
-            jnp.zeros((true_num_states, EMISSION_DIM - 2))
+            jnp.zeros((true_num_states, emission_dim - 2))
         ])
-    emission_covs   = jnp.tile(0.1**2 * jnp.eye(EMISSION_DIM), (true_num_states, 1, 1))
+    emission_covs   = jnp.tile(0.1**2 * jnp.eye(emission_dim), (true_num_states, 1, 1))
     
 
 
@@ -110,23 +109,95 @@ def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
 
 
 
+'remove negative lines and nullify negative elements'
+def rm_null(results):
+    # Remove under-performing student
+    removed = []
+    keys_to_remove = []
+    for key, value in results.items():
+        if key == list(results.keys())[0]:
+            continue  # Skip the header row
+        
+        if isinstance(value[0], list):  # Check if the value is a list of lists
+            if all(max(sublist) < 0 for sublist in value):
+                keys_to_remove.append(key)
+        else:  # If it's a list of numbers
+            if max(value) < 0:
+                keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        del results[key]
+        removed.append(key)
+
+    # Remove under-performing seed-generated students sub-lists
+    data = {}
+    null_n = lambda list: [x if x >= 0 else 0 for x in list] #nullify negative
+    for key, value in results.items():
+        if key != list(results.keys())[0]: # list(results.keys())[0] = index title
+            data[key] = [null_n(row) for row in value if any(x >= 0 for x in row)]
+    
+    return data
+
+
+'Convert dict to DF'
+def df_conv(data, index, index_title):  
+    result = {}
+    for key, value in data.items():
+        arr = np.array(value)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        result[key] = arr.T.tolist()
+    
+    df = pd.DataFrame(result, index=index)
+
+    
+    for col in df.columns:
+        df[col] = df[col].apply(np.array)
+    pd.set_option('display.max_colwidth', None)
+
+    df.index.name = index_title
+
+    df.to_csv('Params likelihood.csv')
+    
+    return df
+
+
+def likelihood(params, teachers):
+    results = {"Likelihood over" : [f'T{i}' for i, _ in enumerate(teachers)]}
+
+    for key, models, hmm_type in params:
+        results[key] = []
+        for model in models:
+            results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers])
+    
+    data = rm_null(results)
+
+    index_title = list(results.keys())[0]
+    index = results[index_title]
+    
+    df = df_conv(data, index, index_title)
+
+    return df
+
+
 
 
 NUM_TRAIN_BATCHS  = 3
 NUM_TEST_BATCHS    = 1
 
-NUM_EPOCHS          = 3
+NUM_EPOCHS          = 3 #Increase the pochs before addin , num_iters=NUM_EPOCHS to fit_em
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
 STUDENTS_NUM        = 2
-epsilon             = 0.1
-scale               = 0.1
+
 
 'HMM Type and settings'
+emission_dim = 2
 true_num_states = 10
-EMISSION_DIM = 2
-hmm = GaussianHMM(true_num_states, EMISSION_DIM)
-hmm_n = GaussianHMM(2, EMISSION_DIM)
+epsilon             = 0.1
+scale               = 0.1
+hmm = GaussianHMM(true_num_states, emission_dim)
+hmm_n = GaussianHMM(2, emission_dim)
 
 
 
@@ -164,14 +235,14 @@ if __name__ == '__main__':
 
 
     'Baseline option 1'
-    # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
+    # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, emission_dim), rowvar=False)).pdf(new_data)
     # base    = lambda train, test : np.log(n(train, test)).sum(axis=1).mean(axis=0)
     'Baseline option 2'
     baseline_model = GaussianMixture(n_components=1)
     base = lambda train,test: baseline_model.fit(
-            train.reshape(-1, EMISSION_DIM)
+            train.reshape(-1, emission_dim)
             ).score_samples(
-                test.reshape(-1, EMISSION_DIM)
+                test.reshape(-1, emission_dim)
             ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
 
     # S_l, S_l_props= hmm_n.initialize(jr.PRNGKey(1000))
@@ -197,7 +268,7 @@ if __name__ == '__main__':
 
 
     'Train'
-    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions, num_iters=NUM_EPOCHS) for param, prop in zip(*[params, props])])
+    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions) for param, prop in zip(*[params, props])])
     # single_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=NUM_EPOCHS)
 
     S0, _   = fit(hmm, S, S_props, T0_emissions_train)
@@ -228,83 +299,14 @@ if __name__ == '__main__':
 
 
     #TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
-    likelihood_title = "Likelihood over"
-    results = {likelihood_title : ["T0", "T1", "T2"]}
 
 
+    df = likelihood(params, teachers)
 
-    # for key, model, hmm_type in params:
-    #         for T, train, test in teachers:
-    #             print((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test)))
-            # print(f'base  = {base(train, test)}')
-            # print(f' init = {ev(hmm,S0,test)}')
-            # print(f' S0 = {ev(hmm, S0, test)}')
-            # print(f' T = {ev(hmm, T, test)}')
-            # print((ev_l(S_l1, test, hmm_n)-base(train, test))/(ev(T, test)-base(train, test)))
-    # results['base'] = [base(train, test)  for T, train, test in teachers]
-
-
-
-    removed = []
-    for key, models, hmm_type in params:
-        results[key] = []
-        for model in models:
-            results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers])
-            
-            # if max(results[key])<0:
-            #     print(results[key])
-            #     del results[key]
-            #     removed.append(key)
-
-
-    # for key in results:
-    #     for model_result in results[key]:
-    #         print(model_result)
-
-    removed = []
-    keys_to_remove = []
-
-    for key, value in results.items():
-        if key == 'Likelihood over':
-            continue  # Skip the header row
-        
-        if isinstance(value[0], list):  # Check if the value is a list of lists
-            if all(max(sublist) < 0 for sublist in value):
-                keys_to_remove.append(key)
-        else:  # If it's a list of numbers
-            if max(value) < 0:
-                keys_to_remove.append(key)
-
-    for key in keys_to_remove:
-        del results[key]
-        removed.append(key)
-
-    
-    
-
-    normalized_data = {}
-    for key, value in results.items():
-        if isinstance(value[0], list):
-            # If it's a list of lists, we'll create separate columns for each sublist
-            for i, sublist in enumerate(value):
-                normalized_data[f"{key}_{i}"] = sublist
-        else:
-            normalized_data[key] = value
-
-    # Now create the DataFrame
-    df = pd.DataFrame(normalized_data)
-
-    # Set the 'Likelihood over' column as the index if you want
-    df.set_index('Likelihood over', inplace=True)
     print(df)
+    # print(f'\nRemoved models with low performance: {removed}')
 
 
-
-    df.to_csv('Params likelihood.csv')
-
-    print(f'\nRemoved models with low performance: {removed}')
-
-    # df = nullify_negative(df)
     # visualize(df)
 
 
@@ -323,13 +325,13 @@ if __name__ == '__main__':
     # params = [T0, student_params_initial, student_params_trained]
 
 
-    # plot_m_arr(params, EMISSION_DIM, true_num_states)
+    # plot_m_arr(params, emission_dim, true_num_states)
 
 '''
 TODO
 0. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
 1. Evaluate all on unseen teacher T3 V
-2. Repeating each curriculum with many randomly initialized students.
+2. Repeating each curriculum with many randomly initialized students. 
 3. Visualize results: Use rings on teacher's data, and graph the dataframe's data 
 4. ! Plan/compute algo for generalizing students (s_1..1,s_1..2...?) for 5 teachers (T5) - combinatorics computation:
 1->x->y where y>=x>=1

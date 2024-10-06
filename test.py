@@ -12,43 +12,34 @@
 # print(mv(A,b))
 
 
-# Current initialization
-S, S_props = zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-S_l, S_l_props = zip(*[hmm_n.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+import pandas as pd
+import numpy as np
 
-# Training function
-fit = lambda hmm_class, params, props, emissions : [hmm_class.fit_em(param, prop, emissions) for param, prop in zip(params, props)]
+def dframe(data, index=['T0', 'T1', 'T2']):
+    result = {}
+    for key, value in data.items():
+        arr = np.array(value)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        result[key] = arr.T.tolist()
+    
+    df = pd.DataFrame(result, index=index)
+    return df
 
-# Current training calls
-S0, _   = fit(hmm, S, S_props, T0_emissions_train)
-S1, _   = fit(hmm, S, S_props, T1_emissions_train)
-S00, _  = fit(hmm, S0, S_props, T0_emissions_train)
-S01, _  = fit(hmm, S0, S_props, T1_emissions_train)
-S11, _  = fit(hmm, S1, S_props, T1_emissions_train)
-T01, _  = fit(hmm, T0, T0_props, T1_emissions_train)
-S_l0, _ = fit(hmm_n, S_l, S_l_props, T0_emissions_train)
+# Test data
+data = {
+    'S0': [[0.9310199618339539, -487.2692565917969, -1222.5260009765625], 
+           [0.9301355481147766, -470.9032897949219, -1179.9246826171875]],
+    'S1': [[-10.34585189819336, 0.03304697945713997, -8.23599910736084], 
+           [-10.432733535766602, 0.14426057040691376, -8.45174789428711]],
+    'S00': [[0.9338423013687134, -484.57708740234375, -1217.4638671875], 
+            [0.9307991862297058, -467.2206115722656, -1171.578857421875]],
+    'S01': [[-10.307413101196289, 0.7140099406242371, -7.795291900634766], 
+            [-10.386242866516113, 0.706073522567749, -7.8934407234191895]],
+    'S11': [[-10.335633277893066, 0.19122131168842316, -8.180229187011719], 
+            [-10.410856246948242, 0.1675550490617752, -8.368451118469238]],
+    'S_l0': [[0.645107626914978, -462.34185791015625, -1166.82470703125]]
+}
 
-# Evaluation function
-evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0)
-ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean()
-
-# Results compilation
-params = [
-    ["T0" , T0 , hmm],
-    ["T1" , T1 , hmm],
-    ["T2" , T2 , hmm], 
-    ["S"  , S  , hmm],
-    ["S0" , S0 , hmm],
-    ["S1" , S1 , hmm],
-    ["S00", S00, hmm],
-    ["S01", S01, hmm],
-    ["S11", S11, hmm],
-    ["T01" , T01, hmm],
-    ["S_l", S_l, hmm_n],
-    ["S_l0",S_l0, hmm_n]
-]
-
-# Results processing
-for key, models, hmm_type in params:
-    for model in models:
-        results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers])
+df = dframe(data)
+print(df)
