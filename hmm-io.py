@@ -136,7 +136,7 @@ def rm_null(results):
         if key != list(results.keys())[0]: # list(results.keys())[0] = index title
             data[key] = [null_n(row) for row in value if any(x >= 0 for x in row)]
     
-    return data
+    return data, removed
 
 
 'Convert dict to DF'
@@ -170,14 +170,14 @@ def likelihood(params, teachers):
         for model in models:
             results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(hmm, T, test)-base(train, test))) for T, train, test in teachers])
     
-    data = rm_null(results)
+    data, removed_col = rm_null(results)
 
     index_title = list(results.keys())[0]
     index = results[index_title]
     
     df = df_conv(data, index, index_title)
 
-    return df
+    return df, removed_col
 
 
 
@@ -188,7 +188,7 @@ NUM_TEST_BATCHS    = 1
 NUM_EPOCHS          = 3 #Increase the pochs before addin , num_iters=NUM_EPOCHS to fit_em
 NUM_TIMESTEPS       = 100
 NUM_TRIALS          = 1000
-STUDENTS_NUM        = 2
+STUDENTS_NUM        = 5
 
 
 'HMM Type and settings'
@@ -301,13 +301,13 @@ if __name__ == '__main__':
     #TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
 
 
-    df = likelihood(params, teachers)
+    df, removed_students = likelihood(params, teachers)
 
     print(df)
-    # print(f'\nRemoved models with low performance: {removed}')
+    print(f'\nRemoved models with low performance: {removed_students}')
 
 
-    # visualize(df)
+    visualize(df)
 
 
 

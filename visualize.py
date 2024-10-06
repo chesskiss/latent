@@ -6,86 +6,92 @@ from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
 
 
 def visualize(df):
-    # df.set_index('Likelihood over', inplace=True) # Set 'Likelihood over' as the index
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-
-    # x = df.loc['T0']
-    # y = df.loc['T1']
-    # z = df.loc['T2']
-
-    # ax.scatter(x, y, z)
-
-    # ax.set_xlabel('T0')
-    # ax.set_ylabel('T1')
-    # ax.set_zlabel('T2')
-    # ax.set_title('3D Likelihood Plot')
-
-    # plt.savefig('Likelihoods graph.png')
-    # plt.show()
-
-    df.set_index('Likelihood over', inplace=True)  # Set 'Likelihood over' as the index
-    
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(111, projection='3d')
-    
-    # Separate columns that begin with 'T' and those that don't
-    t_cols = [col for col in df.columns if col.startswith('T')]
-    s_cols = [col for col in df.columns if not col.startswith('T')]
-    
-    # Plot students
-    x = df.loc['T0', s_cols]
-    y = df.loc['T1', s_cols]
-    z = df.loc['T2', s_cols]
-    ax.scatter(x, y, z, c='b', marker='o', s=50, label='S group')
-    
-    # Plot teachers
-    s = df.loc['T0', t_cols]
-    u = df.loc['T1', t_cols]
-    v = df.loc['T2', t_cols]
-    ax.scatter(s, u, v, c='r', marker='x', s=100, label='T group')
-    
+
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(df.columns)))
+
+    for col, color in zip(df.columns, colors):
+        x = df.loc['T0', col]
+        y = df.loc['T1', col]
+        z = df.loc['T2', col]
+        
+        # Check if we have a list of points
+        if isinstance(x, list):
+            for i in range(len(x)):
+                ax.scatter(x[i], y[i], z[i], c=[color], marker='o', s=50, label=col if i == 0 else "")
+        else:
+            ax.scatter(x, y, z, c=[color], marker='o', s=50, label=col)
+
     ax.set_xlabel('Performance on T0')
     ax.set_ylabel('Performance on T1')
     ax.set_zlabel('Performance on T2')
     ax.set_title('3D Likelihood Plot')
-    
-    ax.legend()
-    
-    plt.savefig('Likelihoods graph.png')
+
+    # Put legend outside the plot
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    plt.tight_layout()
+    plt.savefig('Likelihoods graph.png', bbox_inches='tight')
     plt.show()
 
 
 
-def nullify_negative(df):
-    """
-    Set negative values to zero in JAX array elements of a DataFrame.
+
+
+
+
+# def visualize(df):
+#     # df.set_index('Likelihood over', inplace=True) # Set 'Likelihood over' as the index
+
+#     # fig = plt.figure()
+#     # ax = fig.add_subplot(111, projection='3d')
+
+#     # x = df.loc['T0']
+#     # y = df.loc['T1']
+#     # z = df.loc['T2']
+
+#     # ax.scatter(x, y, z)
+
+#     # ax.set_xlabel('T0')
+#     # ax.set_ylabel('T1')
+#     # ax.set_zlabel('T2')
+#     # ax.set_title('3D Likelihood Plot')
+
+#     # plt.savefig('Likelihoods graph.png')
+#     # plt.show()
+
+#     df.set_index('Likelihood over', inplace=True)  # Set 'Likelihood over' as the index
     
-    :param df: Input DataFrame with JAX array elements
-    :return: DataFrame with negative values in JAX arrays set to zero
-    """
-    # def nullify_if_jax_array(x):
-    #     if isinstance(x, jnp.ndarray):
-    #         return jnp.maximum(x, 0)
-    #     return x
-
-    # return df.applymap(nullify_if_jax_array)
-
-    """
-    Set negative values to zero in JAX array elements and float values of a DataFrame.
+#     fig = plt.figure(figsize=(12, 8))
+#     ax = fig.add_subplot(111, projection='3d')
     
-    :param df: Input DataFrame with JAX array elements and float values
-    :return: DataFrame with negative values in JAX arrays and floats set to zero
-    """
-    def nullify_if_negative(x):
-        if isinstance(x, jnp.ndarray):
-            return jnp.maximum(x, 0)
-        elif isinstance(x, (float, np.float32, np.float64)):
-            return max(x, 0)
-        return x
+#     # Separate columns that begin with 'T' and those that don't
+#     t_cols = [col for col in df.columns if col.startswith('T')]
+#     s_cols = [col for col in df.columns if not col.startswith('T')]
+    
+#     # Plot students
+#     x = df.loc['T0', s_cols]
+#     y = df.loc['T1', s_cols]
+#     z = df.loc['T2', s_cols]
+#     ax.scatter(x, y, z, c='b', marker='o', s=50, label='S group')
+    
+#     # Plot teachers
+#     s = df.loc['T0', t_cols]
+#     u = df.loc['T1', t_cols]
+#     v = df.loc['T2', t_cols]
+#     ax.scatter(s, u, v, c='r', marker='x', s=100, label='T group')
+    
+#     ax.set_xlabel('Performance on T0')
+#     ax.set_ylabel('Performance on T1')
+#     ax.set_zlabel('Performance on T2')
+#     ax.set_title('3D Likelihood Plot')
+    
+#     ax.legend()
+    
+#     plt.savefig('Likelihoods graph.png')
+#     plt.show()
 
-    return df.applymap(nullify_if_negative)
 
 
 
