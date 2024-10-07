@@ -167,48 +167,19 @@ def dgen(teachers):
 
 
 'Train/fit the HMMs'
-def students_init_train(teachers):
+def train(teachers, S, S_props, hmm_student):
     fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions) for param, prop in zip(*[params, props])])
-
-    students = []
-
-    S = []
-    S_props = []
-    hmm_student = [GaussianHMM(num, EMISSION_DIM) for num in range(TRUE_NUM_STATES, MAX_S_STATE)]
-    for hmm in hmm_student:
-        S_element, S_props_element = zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-        S.append(S_element)
-        S_props.append(S_props_element)
-    '''
-    hmm_student = [GaussianHMM(num, EMISSION_DIM) for num in range(TRUE_NUM_STATES, MAX_S_STATE)]
-    S, S_props = zip(*[
-        zip(*[hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-        for hmm in hmm_student
-    ])
-    '''
-
-    for key in S_KEYS:
-        for s, s_prop in zip(S,S_props):
-            next_s, _   = fit(hmm_student, s, s_prop, teachers[0][1])
-            students.extend([next_s, hmm_student])
-        
-    
-    S_KEYS  = ['0', '1', '00', '01', '11'] #TODO
-
-    #TODO correct loop
+    # single_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=NUM_EPOCHS)
+    #TODO turn into a loop...
     S0, _   = fit(hmm_student, S, S_props, teachers[0][1])
     S1, _   = fit(hmm_student, S, S_props, teachers[1][1])
     S00, _  = fit(hmm_student, S0, S_props, teachers[0][1])
     S01, _  = fit(hmm_student, S0, S_props, teachers[1][1])
     S11, _  = fit(hmm_student, S1, S_props, teachers[1][1])
-
-    #TODO teacher fitting
-    # single_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=NUM_EPOCHS)
     # T01, _  = single_fit(hmm, T0, T0_props, T1_emissions_train)
     # S_l0, _ = fit(hmm_student, S_l, S_l_props, T0_emissions_train)
 
-
-    return students
+    return S0, S1, S00, S01, S11
 
 
 
@@ -259,7 +230,10 @@ def df_conv(data, index, index_title):
         df[col] = df[col].apply(np.array)
     pd.set_option('display.max_colwidth', None)
 
-    df.index.name = index_title
+    df.index.name = index_title # Bring the table title back
+
+    #Switch columns, to bring
+    df = df.reindex(sorted(df.columns, key=lambda x: x.split('_')[0]), axis=1) 
 
     df.to_csv('Params likelihood.csv')
     
@@ -271,11 +245,9 @@ def likelihood(students, teachers):
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
 
     results = {"Likelihood over" : [f'T{i}' for i, _ in enumerate(teachers)]}
-    keys    = []
-
-    for key in S_KEYS:
-        keys.extend(f"S{key}_{i}" for i in range(MAX_S_STATE - TRUE_NUM_STATES))  # ["T01" , T01, HMM] #TODO include teacher/s ]
-        
+    keys = []
+    for i in range(MAX_S_STATE - TRUE_NUM_STATES):
+        keys.extend([f"S0_{i}", f"S1_{i}", f"S00_{i}", f"S01_{i}", f"S11_{i}"]) # ["T01" , T01, HMM] #TODO include teacher/s ]
 
     for key, models, hmm_type in zip(keys, [student[0] for student in students], [student[1] for student in students]):
         results[key] = []
@@ -306,18 +278,25 @@ STUDENTS_NUM        = 2
 'HMM Type and settings'
 EMISSION_DIM    = 5
 TRUE_NUM_STATES = 10
-MAX_S_STATE     = TRUE_NUM_STATES + 2
+MAX_S_STATE     = TRUE_NUM_STATES + 20
 epsilon         = 0.1
 scale           = 0.1
 HMM = GaussianHMM(TRUE_NUM_STATES, EMISSION_DIM)
-S_KEYS  = ['0', '1', '00', '01', '11'] #TODO
+
 
 if __name__ == '__main__':
     T0, T1, T2, base = init_teachers()
     teachers = [T0, T1, T2]
     teachers = dgen(teachers)
 
-    students = students_init_train(teachers)
+    students = []
+    for num in range(TRUE_NUM_STATES, MAX_S_STATE):
+        hmm_student = GaussianHMM(num, EMISSION_DIM)
+        S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+
+        students_data = train(teachers, S, S_props, hmm_student)
+        students.extend([s, hmm_student] for s in students_data)
+
 
     df, removed_students = likelihood(students, teachers)
 
