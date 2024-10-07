@@ -3,6 +3,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
 
+from hmmST import *
+
 
 
 def visualize(df):
@@ -26,7 +28,7 @@ def visualize(df):
     ax.set_xlabel('Performance on T0')
     ax.set_ylabel('Performance on T1')
     ax.set_zlabel('Performance on T2')
-    ax.set_title('3D Likelihood Plot')
+    ax.set_title(f'Likelihood Plot\n Students num: {STUDENTS_NUM} Emissions Dim: {EMISSION_DIM} True num states: {TRUE_NUM_STATES}')
 
     # Put legend outside the plot
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -34,9 +36,6 @@ def visualize(df):
     plt.tight_layout()
     plt.savefig('Likelihoods graph.png', bbox_inches='tight')
     plt.show()
-
-
-
 
 
 
