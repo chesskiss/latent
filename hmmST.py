@@ -1,8 +1,10 @@
+from macros import *
 import subprocess
 import sys
 import scipy.stats
 import numpy as np
 import pandas as pd
+from add_extraneous import *
 # from IPython.display import display
 
 try: #TODO repeat for all libs? 
@@ -20,7 +22,7 @@ import jax.random as jr
 from scipy.stats import multivariate_normal
 
 from sklearn.mixture import GaussianMixture 
-from dynamax.hidden_markov_model import GaussianHMM
+# from dynamax.hidden_markov_model import GaussianHMM
 from dynamax.hidden_markov_model import DiagonalGaussianHMM
 from dynamax.hidden_markov_model import SphericalGaussianHMM
 from dynamax.hidden_markov_model import SharedCovarianceGaussianHMM
@@ -33,8 +35,8 @@ from visualize import *
 #TODO normalize rows/columns only, depending on j/i
 def normalize(A):
     A /= A.sum(axis=1, keepdims=True) #Normalize rows
-    A = A.at[-1].set(1 - jnp.sum(A[:-1], axis=0)) #last row is defined
-    A = A.at[:, -1].set(1 - jnp.sum(A[:, :-1], axis=1)) #last column is defined
+    # A = A.at[-1].set(1 - jnp.sum(A[:-1], axis=0)) #last row is defined
+    # A = A.at[:, -1].set(1 - jnp.sum(A[:, :-1], axis=1)) #last column is defined
     return A
 
 
@@ -42,7 +44,7 @@ def perturbation(perturbation_num, epsilon, initial_probs, transition_matrix, em
     key = jr.PRNGKey(perturbation_num)
     np.random.seed(perturbation_num)
 
-    initial_probs += jr.uniform(key, shape=(TRUE_NUM_STATES,))
+    initial_probs += epsilon*jr.uniform(key, shape=(TRUE_NUM_STATES,))
     initial_probs = initial_probs / jnp.sum(initial_probs)
     
     rn  = lambda x : jr.uniform(key, minval = -x, maxval = x)
@@ -54,7 +56,7 @@ def perturbation(perturbation_num, epsilon, initial_probs, transition_matrix, em
     transition_matrix   = normalize(transition_matrix)
 
     emissions_means += np.random.normal(-epsilon, epsilon, emissions_means.shape) 
-    emissions_cov   += np.random.normal(0, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
+    # emissions_cov   += np.random.normal(0, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
     emissions_cov   += np.random.normal(-epsilon, epsilon) * jnp.eye(EMISSION_DIM)[None, :, :]
     emissions_cov   = (emissions_cov + np.swapaxes(emissions_cov, -2, -1)) / 2 #Create PSD part 1 : ( A + A.T )/ 2
     # Create PSD part 2 : Make diagonal absolute value:
@@ -121,20 +123,21 @@ def init_teachers():
                                             covs)
     T2, _           = HMM.initialize(initial_probs=init, transition_matrix=trans,
                                     emission_means=means, emission_covariances=covs)
-    
-    'Baseline option 1'
-    # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
-    # base    = lambda train, test : np.log(n(train, test)).sum(axis=1).mean(axis=0)
-    'Baseline option 2'
-    baseline_model = GaussianMixture(n_components=1)
-    base = lambda train,test: baseline_model.fit(
-            train.reshape(-1, EMISSION_DIM)
-            ).score_samples(
-                test.reshape(-1, EMISSION_DIM)
-            ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
 
-    return T0, T1, T2, base
+    return T0, T1, T2
 
+
+
+def create_students(teacher, students_num):
+    students = []
+    # Add perfect student
+    #TODO atm not necessary. Just replace main code and run!
+
+    # Add poor student
+    for i in range(1, students_num+1):
+        student = add_ring(teacher, ring_length=i)
+        students.append(student)
+    return students
 
 
 
@@ -167,11 +170,19 @@ def dgen(teachers):
 
 
 'Train/fit the HMMs'
-def train(teachers, S, S_props, hmm_student):
-    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions) for param, prop in zip(*[params, props])])
-    # single_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=NUM_EPOCHS)
+def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em #TODO: max epoch = 10 
+    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions) for param, prop in zip(*[params, props])])
+    teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, num_iters=1) 
+
     #TODO turn into a loop...
-    S0, _   = fit(hmm_student, S, S_props, teachers[0][1])
+    #TODO integrate decoding and df_conv
+
+    # loss = []
+    # for _ in range(NUM_EPOCHS):
+    S0, loss   = fit(hmm_student, S, S_props, teachers[0][1])
+
+
+    
     S1, _   = fit(hmm_student, S, S_props, teachers[1][1])
     S00, _  = fit(hmm_student, S0, S_props, teachers[0][1])
     S01, _  = fit(hmm_student, S0, S_props, teachers[1][1])
@@ -193,7 +204,7 @@ def rm_null(results):
         if key == list(results.keys())[0]:
             continue  # Skip the header row
         
-        if isinstance(value[0], list):  # Check if the value is a list of lists
+        if isinstance(value[0], list):  # Check if the value is a list of lists #TODO no need to check..
             if all(max(sublist) < 0 for sublist in value):
                 keys_to_remove.append(key)
         else:  # If it's a list of numbers
@@ -209,102 +220,172 @@ def rm_null(results):
     null_n = lambda list: [x if x >= 0 else 0 for x in list] #nullify negative
     for key, value in results.items():
         if key != list(results.keys())[0]: # list(results.keys())[0] = index title
-            data[key] = [null_n(row) for row in value if any(x >= 0 for x in row)]
+            # data[key] = [null_n(row) for row in value if any(x >= 0 for x in row)]  TODO ?
+            data[key] = [row for row in value] 
     
     return data, removed
+    # return results, removed
 
 
 'Convert dict to DF'
-def df_conv(data, index, index_title):  
+def df_conv(results):  
     result = {}
-    for key, value in data.items():
-        arr = np.array(value)
-        if arr.ndim == 1:
-            arr = arr.reshape(1, -1)
-        result[key] = arr.T.tolist()
+    for i, data in enumerate(results):
+        index_title = list(data.keys())[0]
+        index = data[index_title]
+        for key, value in data.items():
+            arr = np.array(value)
+            if arr.ndim == 1:
+                arr = arr.reshape(1, -1)
+            result[key] = arr.T.tolist()
     
-    df = pd.DataFrame(result, index=index)
+        df = pd.DataFrame(result, index=index)
 
-    
-    for col in df.columns:
-        df[col] = df[col].apply(np.array)
-    pd.set_option('display.max_colwidth', None)
+        
+        for col in df.columns:
+            df[col] = df[col].apply(np.array)
+        pd.set_option('display.max_colwidth', None)
 
-    df.index.name = index_title # Bring the table title back
+        df.index.name = index_title # Bring the table title back
 
-    #Switch columns, to bring
-    df = df.reindex(sorted(df.columns, key=lambda x: x.split('_')[0]), axis=1) 
+        #Switch columns, to bring
+        # df = df.reindex(sorted(df.columns, key=lambda x: x.split('_')[0]), axis=1)  #TODO Remove if not working or needed
 
-    df.to_csv('Params likelihood.csv')
+        df.to_csv(f'Params likelihood S->T.csv') if i == 0 else df.to_csv(f'Params likelihood T->S.csv')
     
     return df
 
 
 def likelihood(students, teachers):
+    'Baseline option 1'
+    # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
+    # base    = lambda train, test : np.log(n(train, test)).sum(axis=1).mean(axis=0)
+    'Baseline option 2'
+    baseline_model = GaussianMixture(n_components=1)
+    base = lambda train,test: baseline_model.fit(
+            train.reshape(-1, EMISSION_DIM)
+            ).score_samples(
+                test.reshape(-1, EMISSION_DIM)
+            ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
+    
+
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
 
     results = {"Likelihood over" : [f'T{i}' for i, _ in enumerate(teachers)]}
     keys = []
-    for i in range(MAX_S_STATE - TRUE_NUM_STATES):
-        keys.extend([f"S0_{i}", f"S1_{i}", f"S00_{i}", f"S01_{i}", f"S11_{i}"]) # ["T01" , T01, HMM] #TODO include teacher/s ]
 
+    #We duplicate the keys in the eeded amount to include students with a larger number of states
+    for _ in range(MAX_S_STATE - TRUE_NUM_STATES):
+        keys.extend(f"S{key}" for key in S_KEYS) # ["T01" , T01, HMM] #TODO include teacher/s ]
+
+    # results.update({key: [] for key in S_KEYS}) TODO doesn't work
+    for k in S_KEYS:
+        results[f'S{k}'] = []
+
+
+    # adding student likelihoods to the DF columns (Sk with min num of states, Sk with min num of states+1, ...)
     for key, models, hmm_type in zip(keys, [student[0] for student in students], [student[1] for student in students]):
-        results[key] = []
+        #will loop based on number of students (student_num)
         for model in models:
             results[key].append([float((ev(hmm_type, model, test)-base(train, test))/(ev(HMM, T, test)-base(train, test))) for T, train, test in teachers])
+
+    # adding teachers likelihoods to the DF columns
+    for i, teacher in enumerate(teachers):
+        results[f'T{i}'] = [float((ev(HMM, teacher[0], test)-base(train, test))/(ev(HMM, T, test)-base(train, test))) for T, train, test in teachers]
+
     
     data, removed_col = rm_null(results)
 
     index_title = list(results.keys())[0]
     index = results[index_title]
     
-    df = df_conv(data, index, index_title)
+    df = df_conv(data) #, index, index_title)
 
     return df, removed_col
 
 
 
+def decode(students, teachers):
+    resultsST = {"S->T Decoding" : [f'T{i}' for i, _ in enumerate(teachers)]}
+    resultsTS = {"T->S Decoding" : [f'T{i}' for i, _ in enumerate(teachers)]}
+    keys = []
 
-NUM_TRAIN_BATCHS  = 3
-NUM_TEST_BATCHS    = 1
+    #We duplicate the keys in the eeded amount to include students with a larger number of states
+    for _ in range(MAX_S_STATE - TRUE_NUM_STATES):
+        keys.extend(f"S{key}" for key in S_KEYS) # ["T01" , T01, HMM] #TODO include teacher/s 
 
-NUM_EPOCHS          = 3 #Increase the pochs before addin , num_iters=NUM_EPOCHS to fit_em
-NUM_TIMESTEPS       = 100
-NUM_TRIALS          = 1000
-STUDENTS_NUM        = 2
+    # results.update({key: [] for key in S_KEYS}) TODO doesn't work
+    for k in S_KEYS:
+        resultsST[f'S{k}'] = []
+        resultsTS[f'S{k}'] = []
 
 
-'HMM Type and settings'
-EMISSION_DIM    = 5
-TRUE_NUM_STATES = 10
-MAX_S_STATE     = TRUE_NUM_STATES + 20
-epsilon         = 0.1
-scale           = 0.1
-HMM = GaussianHMM(TRUE_NUM_STATES, EMISSION_DIM)
+    # adding student likelihoods to the DF columns (Sk with min num of states, Sk with min num of states+1, ...)
+    for key, student, hmm_type in zip(keys, [s for s in students], [student[1] for student in students]):
+        for model in student[0]: #will loop based on number of students (student_num)
+            resultsST[key].append([decoding(student[1], model, HMM, T, test) for T, train, test in teachers])
+            resultsTS[key].append([decoding(HMM, T, student[1], model, test) for T, train, test in teachers])
+
+    
+
+    # adding teachers likelihoods to the DF columns
+    for i, teacher in enumerate(teachers):
+        resultsST[f'T{i}'] = [decoding(HMM, teacher[0], HMM, T, test) for T, train, test in teachers]
+        resultsTS[f'T{i}'] = [decoding(HMM, T, HMM, teacher[0], test) for T, train, test in teachers]
+
+    
+    # data, removed_col = rm_null(results)
+
+    results = [resultsST, resultsTS]
+    
+    df = df_conv(results)
+
+    return df
 
 
 if __name__ == '__main__':
-    T0, T1, T2, base = init_teachers()
+
+    # if True:
+        # results = load_csv()
+
+    # else: 
+    T0, T1, T2 = init_teachers()
     teachers = [T0, T1, T2]
     teachers = dgen(teachers)
 
+    # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
     students = []
-    for num in range(TRUE_NUM_STATES, MAX_S_STATE):
+    for num in range(MIN_S_STATE, MAX_S_STATE):
         hmm_student = GaussianHMM(num, EMISSION_DIM)
         S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-
         students_data = train(teachers, S, S_props, hmm_student)
         students.extend([s, hmm_student] for s in students_data)
+        
+    #New code - will use later on
+    # students = create_students(T0, STUDENTS_NUM)
+    # for s in students:
+    #     students_data = train(teachers, s, S_props, hmm_student)
 
 
-    df, removed_students = likelihood(students, teachers)
+    # score = pd.DataFrame({'model to model' : decoding(students[0][1], students[0][0][0], HMM, T0, teachers[0][2], "model_to_model.png")})
+    results = decode(students, teachers)
+        # for df in results:
+            # print(f'{df}')
 
-    print(df)
-    print(f'\nRemoved models with low performance: {removed_students}')
+        # print(score)
 
-    visualize(df)
+        # df, removed_students = likelihood(students, teachers)
 
+        # print(df)
+        # print(f'\nRemoved models with low performance: {removed_students}')
+
+
+
+    # performance_plot_3D(df)
+    performance_plot(results)
+
+    # transitions_plot(students[0][1], ) for later... 
 
     'Plot emissions and true_states in the emissions plane'
     # plot_gaussian_hmm(HMM, T0, T0_emissions_test[0], T0_states[0], title="True HMM emission distribution")
@@ -314,25 +395,40 @@ if __name__ == '__main__':
 
 
 
+#TODO Dec 19 2024:
+'''
+1. Fix bugs (teachers should not be 1 on more than 1, don't trim on zeros )
+- DF is wrong! check with epsilon 0 scale 0
+- testing is different for the same data set
+2. Alter perturbation (SGD)
+3. 
+
+Goal - a model that does well on T1, will also do reasonably well on T0 or vice versa
+'''
 
 #TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
 '''
 TODO
--report... 
-1. In debug mode- how to run from a specific line while keeping the state?
-2. Generalize student S_l
-3. Keep function extractions and organizations for teachers, etc. 
+1. In debug mode- how to run from a specific line while keeping the state? 
+... Hot decode ? Ask Community
+
+2. Table shows students only good on one teacher and 0 on the other, and one teacher good on all?
+3. Cross decoding afterwards
+
 
 ...
-4. ! Plan/compute algo for generalizing students (s_1..1,s_1..2...?) for 5 teachers (T5) - combinatorics computation:
+Archive
+. ! Plan/compute algo for generalizing students (s_1..1,s_1..2...?) for 5 teachers (T5) - combinatorics computation:
 1->x->y where y>=x>=1
-5. Generalize teachers and students using the algorithms I developed and evaluate on an unseen teacher T6
-6. Visualize again w/ various dim reductions methods (PCA), or just likelihood, over T6.
-7. Try again for 99+1 teachers.
-8. try for several emission dims, and other generalizations + check specifications (final level)
+. Generalize teachers and students using the algorithms I developed and evaluate on an unseen teacher T6
+. Visualize again w/ various dim reductions methods (PCA), or just likelihood, over T6.
+. Try again for 99+1 teachers.
+. try for several emission dims, and other generalizations + check specifications (final level)
 *optional: 1 graph per 1 teacher's emissions, have 5 graphs total, or merge them (using different colors per teachers emissions eval)
-0. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
+. Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
 '''
+
+
 
 '''
 What have I done:
@@ -342,12 +438,9 @@ What have I done:
     Evaluate all on unseen teacher T3 V
     Repeating each curriculum with many randomly initialized students. V
     Visualize results: Use rings on teacher's data, and graph the dataframe's data V
+    Generalize student S_l V
+    Keep function extractions and organizations for teachers, etc. V
+    Fix 2D plotting V
+
 '''
-
-
-
-
-
-
-
 

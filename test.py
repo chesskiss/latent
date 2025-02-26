@@ -42,4 +42,62 @@ data = {
 }
 
 df = dframe(data)
-print(df)
+# print(df)
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+def visualize(df):
+    fig, axs = plt.subplots(1, 3, figsize=(18, 6))
+    
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(df.columns)))
+    
+    pairs = [('T0', 'T1'), ('T0', 'T2'), ('T1', 'T2')]
+    
+    for idx, (x_label, y_label) in enumerate(pairs):
+        ax = axs[idx]
+        
+        all_x = []
+        all_y = []
+        
+        for col, color in zip(df.columns, colors):
+            x_values = df.loc[x_label, col]
+            y_values = df.loc[y_label, col]
+            
+            # Ensure x_values and y_values are lists
+            if not isinstance(x_values, list):
+                x_values = [x_values]
+            if not isinstance(y_values, list):
+                y_values = [y_values]
+            
+            # Plot each pair of points
+            ax.scatter(x_values, y_values, c=[color], marker='o', s=50, label=col)
+            
+            all_x.extend(x_values)
+            all_y.extend(y_values)
+        
+        ax.set_xlabel(f'Performance on {x_label}')
+        ax.set_ylabel(f'Performance on {y_label}')
+        ax.set_title(f'{x_label} vs {y_label}')
+        
+        # Set axis limits based on data range
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        
+        # Use scientific notation for axis labels if the range is large
+        ax.ticklabel_format(style='sci', scilimits=(-2,2), axis='both')
+    
+    # Set a common title for all subplots
+    fig.suptitle('Likelihood Plots')
+    
+    # Put legend outside the rightmost plot
+    axs[-1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    plt.tight_layout()
+    plt.savefig('Likelihoods graphs.png', bbox_inches='tight')
+    plt.show()
+
+# Visualize the data
+df = pd.read_csv('Params likelihood.csv', index_col=0)
+
+visualize(df)
