@@ -7,6 +7,44 @@ from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
 from hmmST import *
 
 
+'Plot with X = epochs, Y= decoding per teacher and likelihood'
+def plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs):
+    epochs = [i for i, _ in enumerate(loss)]  # Adjusting epochs as requested
+
+    fig, axes = plt.subplots(3, 3, figsize=(12, 12))
+    titles = ['T0', 'T1', 'T2']
+    
+    
+    mean_loss = [np.mean(epoch[0]).item() for epoch in loss]
+
+    # Plot los
+    axes[0, 0].plot(epochs, mean_loss, label='Loss')
+    axes[0, 0].set_title(f'Loss - {titles[0]}')
+    axes[0, 0].set_xlabel('Epochs')
+    axes[0, 0].set_ylabel('Loss')
+    axes[0, 0].legend()
+
+    # Plot decoding T -> S
+    for i in range(3):
+        axes[1, i].plot(epochs, [d[i] for d in decodingST], label=f'Decoding T{i} → S')
+        axes[1, i].set_title(f'Decoding T{i} → S')
+        axes[1, i].set_xlabel('Epochs - 3')
+        axes[1, i].set_ylabel('Accuracy')
+        axes[1, i].legend()
+
+    # Plot decoding S -> T
+    for i in range(3):
+        axes[2, i].plot(epochs, [d[i] for d in decodingTS], label=f'Decoding S → T{i}')
+        axes[2, i].set_title(f'Decoding S → T{i}')
+        axes[2, i].set_xlabel('Epochs - 3')
+        axes[2, i].set_ylabel('Accuracy')
+        axes[2, i].legend()
+
+    plt.tight_layout()
+    plt.savefig('./DecodingLossEpochs.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
 
 
 'Visualize performances'

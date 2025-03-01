@@ -30,9 +30,20 @@ from dynamax.hidden_markov_model import SharedCovarianceGaussianHMM
 from visualize import *
 
 
+'''
+T0 = Ground truth
+T1 = T0 + Perturbation
+T2 = T1 + Perturbation
+... 
 
+S = initial student
+S0 = S Trained on T0
+S1 = trained on T1
+S01 = S0 trained on T1
+...
+Sijk = Sij trained on Tk"
+'''
 
-#TODO normalize rows/columns only, depending on j/i
 def normalize(A):
     A /= A.sum(axis=1, keepdims=True) #Normalize rows
     # A = A.at[-1].set(1 - jnp.sum(A[:-1], axis=0)) #last row is defined
@@ -172,25 +183,29 @@ def dgen(teachers):
 'Train/fit the HMMs'
 def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em #TODO: max epoch = 10 
     fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions) for param, prop in zip(*[params, props])])
-    teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, num_iters=1) 
+    teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions) 
 
-    #TODO turn into a loop...
-    #TODO integrate decoding and df_conv
 
-    # loss = []
-    # for _ in range(NUM_EPOCHS):
-    S0, loss   = fit(hmm_student, S, S_props, teachers[0][1])
-
+    loss        = []
+    decodingST  = []
+    decodingTS  = []
+    for _ in range(NUM_EPOCHS):
+        S, l   = fit(hmm_student, S, S_props, teachers[0][1])
+        loss = np.array(l) if len(loss) == 0 else np.concatenate((loss, l), axis=0)
+        for model in S:
+            decodingST.append([decoding(hmm_student, model, HMM, T, test) for T, train, test in teachers])
+            decodingTS.append([decoding(HMM, T, hmm_student, model, test) for T, train, test in teachers])
 
     
-    S1, _   = fit(hmm_student, S, S_props, teachers[1][1])
-    S00, _  = fit(hmm_student, S0, S_props, teachers[0][1])
-    S01, _  = fit(hmm_student, S0, S_props, teachers[1][1])
-    S11, _  = fit(hmm_student, S1, S_props, teachers[1][1])
-    # T01, _  = single_fit(hmm, T0, T0_props, T1_emissions_train)
+    # S1, _   = fit(hmm_student, S, S_props, teachers[1][1])
+    # S00, _  = fit(hmm_student, S0, S_props, teachers[0][1])
+    # S01, _  = fit(hmm_student, S0, S_props, teachers[1][1])
+    # S11, _  = fit(hmm_student, S1, S_props, teachers[1][1])
+    # T01, _  = single_fit(hmm, T0, T0_props, T1_emissio ns_train)
     # S_l0, _ = fit(hmm_student, S_l, S_l_props, T0_emissions_train)
 
-    return S0, S1, S00, S01, S11
+    # return S0, S1, S00, S01, S11
+    return loss, decodingST, decodingTS
 
 
 
@@ -327,7 +342,6 @@ def decode(students, teachers):
             resultsST[key].append([decoding(student[1], model, HMM, T, test) for T, train, test in teachers])
             resultsTS[key].append([decoding(HMM, T, student[1], model, test) for T, train, test in teachers])
 
-    
 
     # adding teachers likelihoods to the DF columns
     for i, teacher in enumerate(teachers):
@@ -359,9 +373,16 @@ if __name__ == '__main__':
     for num in range(MIN_S_STATE, MAX_S_STATE):
         hmm_student = GaussianHMM(num, EMISSION_DIM)
         S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-        students_data = train(teachers, S, S_props, hmm_student)
-        students.extend([s, hmm_student] for s in students_data)
-        
+        # students_data = train(teachers, S, S_props, hmm_student)
+        # students.extend([s, hmm_student] for s in students_data)
+        loss, decodingST, decodingTS = train(teachers, S, S_props, hmm_student)
+
+
+
+    plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs=NUM_EPOCHS)
+
+
+    
     #New code - will use later on
     # students = create_students(T0, STUDENTS_NUM)
     # for s in students:
@@ -369,7 +390,7 @@ if __name__ == '__main__':
 
 
     # score = pd.DataFrame({'model to model' : decoding(students[0][1], students[0][0][0], HMM, T0, teachers[0][2], "model_to_model.png")})
-    results = decode(students, teachers)
+    # results = decode(students, teachers)
         # for df in results:
             # print(f'{df}')
 
@@ -383,7 +404,7 @@ if __name__ == '__main__':
 
 
     # performance_plot_3D(df)
-    performance_plot(results)
+    # performance_plot(results)
 
     # transitions_plot(students[0][1], ) for later... 
 
@@ -395,29 +416,17 @@ if __name__ == '__main__':
 
 
 
-#TODO Dec 19 2024:
+#TODO Long term
 '''
-1. Fix bugs (teachers should not be 1 on more than 1, don't trim on zeros )
-- DF is wrong! check with epsilon 0 scale 0
-- testing is different for the same data set
-2. Alter perturbation (SGD)
-3. 
+1. Decode with likelihood- how are the students (different seed) changes over the epochs during fit?
+2. Then train on T1, T2... and train S0 again on T1
+3. try changing perturbation for an optimization one (like SGD), and add more T0 teachers (different seeds)
 
-Goal - a model that does well on T1, will also do reasonably well on T0 or vice versa
-'''
-
-#TODO add explanation to df about everything: "T0 = Ground truth, T1 = T0 + Perturbation, T2 = T1 + Perturbation... S = initial student, S0 = S Trained on T0, S1 = trained on T1, S01 = S0 trained on T1, Sijk = Sij trained on Tk, etc. "
-'''
-TODO
-1. In debug mode- how to run from a specific line while keeping the state? 
-... Hot decode ? Ask Community
-
-2. Table shows students only good on one teacher and 0 on the other, and one teacher good on all?
-3. Cross decoding afterwards
+Goal - find a model that does well on T1, should also do reasonably well on T0 or vice versa?
 
 
-...
-Archive
+
+Alternatives:
 . ! Plan/compute algo for generalizing students (s_1..1,s_1..2...?) for 5 teachers (T5) - combinatorics computation:
 1->x->y where y>=x>=1
 . Generalize teachers and students using the algorithms I developed and evaluate on an unseen teacher T6
@@ -426,8 +435,15 @@ Archive
 . try for several emission dims, and other generalizations + check specifications (final level)
 *optional: 1 graph per 1 teacher's emissions, have 5 graphs total, or merge them (using different colors per teachers emissions eval)
 . Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
-'''
 
+
+TODO - side taskquestsa
+1. In debug mode- how to run from a specific line while keeping the state? 
+... Hot decode ? Ask Community
+
+2. Table shows students only good on one teacher and 0 on the other, and one teacher good on all?
+3. Cross decoding afterwards
+'''
 
 
 '''
