@@ -4,6 +4,7 @@ import sys
 import scipy.stats
 import numpy as np
 import pandas as pd
+import optax
 from add_extraneous import *
 # from IPython.display import display
 
@@ -108,6 +109,7 @@ def initial():
     return initial_probs, transition_matrix, emission_means, emission_covs
 
 
+
 'Initialize HMMs'
 def init_teachers():
     initial_probs, transition_matrix, emission_means, emissions_cov = initial()
@@ -164,6 +166,7 @@ def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
     return T0_states, emissions
 
 
+
 'Generate datasets for training and testing'
 def dgen(teachers):
     dataset = []
@@ -179,23 +182,31 @@ def dgen(teachers):
 
 
 
-
 'Train/fit the HMMs'
-def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em #TODO: max epoch = 10 
-    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions) for param, prop in zip(*[params, props])])
+def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em
+    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions, num_epochs=1, optimizer=optax.adam(1e-5)) for param, prop in zip(*[params, props])]) # for fit_em use max_iter
     teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions) 
 
 
     loss        = []
     decodingST  = []
     decodingTS  = []
-    for _ in range(NUM_EPOCHS):
-        S, l   = fit(hmm_student, S, S_props, teachers[0][1])
-        loss = np.array(l) if len(loss) == 0 else np.concatenate((loss, l), axis=0)
+    for i in range(NUM_EPOCHS):
+        print(f'checkpoint - train - iteraion: {i}')
+
+        print(f'checkpoint - train - loss : {loss}')
         for model in S:
             decodingST.append([decoding(hmm_student, model, HMM, T, test) for T, train, test in teachers])
+            print(f'checkpoint - train - decoding TS : {decodingST}')
             decodingTS.append([decoding(HMM, T, hmm_student, model, test) for T, train, test in teachers])
+            print(f'checkpoint - train - decoding ST : {decodingTS}')
 
+        S, l   = fit(hmm_student, S, S_props, teachers[0][1])
+        loss = np.array(l) if len(loss) == 0 else np.concatenate((loss, l), axis=0)
+        print(f'checkpoint - train - end of iteration')
+
+
+    print(f'l = {loss},  {decodingST} ,  {decodingTS}  ')
     
     # S1, _   = fit(hmm_student, S, S_props, teachers[1][1])
     # S00, _  = fit(hmm_student, S0, S_props, teachers[0][1])
@@ -206,7 +217,6 @@ def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em #TODO:
 
     # return S0, S1, S00, S01, S11
     return loss, decodingST, decodingTS
-
 
 
 
@@ -242,6 +252,7 @@ def rm_null(results):
     # return results, removed
 
 
+
 'Convert dict to DF'
 def df_conv(results):  
     result = {}
@@ -269,6 +280,7 @@ def df_conv(results):
         df.to_csv(f'Params likelihood S->T.csv') if i == 0 else df.to_csv(f'Params likelihood T->S.csv')
     
     return df
+
 
 
 def likelihood(students, teachers):
@@ -359,47 +371,34 @@ def decode(students, teachers):
 
 
 if __name__ == '__main__':
+    print('checkpoint 1')
 
-    # if True:
-        # results = load_csv()
+    # # if True:
+    #     # results = load_csv()
 
-    # else: 
-    T0, T1, T2 = init_teachers()
-    teachers = [T0, T1, T2]
-    teachers = dgen(teachers)
+    # # else: 
+    # T0, T1, T2 = init_teachers()
+    # teachers = [T0, T1, T2]
+    # teachers = dgen(teachers)
 
-    # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
-    students = []
-    for num in range(MIN_S_STATE, MAX_S_STATE):
-        hmm_student = GaussianHMM(num, EMISSION_DIM)
-        S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-        # students_data = train(teachers, S, S_props, hmm_student)
-        # students.extend([s, hmm_student] for s in students_data)
-        loss, decodingST, decodingTS = train(teachers, S, S_props, hmm_student)
+    # print('checkpoint 2')
+    # # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
+    # students = []
+    # for num in range(MIN_S_STATE, MAX_S_STATE):
+    #     hmm_student = GaussianHMM(num, EMISSION_DIM)
+    #     S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+    #     # students_data = train(teachers, S, S_props, hmm_student)
+    #     # students.extend([s, hmm_student] for s in students_data)
+    #     print('checkpoint 3')
+    #     loss, decodingST, decodingTS = train(teachers, S, S_props, hmm_student)
 
+    # print('checkpoint 4')
 
-
-    plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs=NUM_EPOCHS)
-
-
-    
-    #New code - will use later on
-    # students = create_students(T0, STUDENTS_NUM)
-    # for s in students:
-    #     students_data = train(teachers, s, S_props, hmm_student)
+    # plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs=NUM_EPOCHS)
 
 
-    # score = pd.DataFrame({'model to model' : decoding(students[0][1], students[0][0][0], HMM, T0, teachers[0][2], "model_to_model.png")})
-    # results = decode(students, teachers)
-        # for df in results:
-            # print(f'{df}')
+    plot_decodingEpochs(None, None, None, num_epochs=NUM_EPOCHS)
 
-        # print(score)
-
-        # df, removed_students = likelihood(students, teachers)
-
-        # print(df)
-        # print(f'\nRemoved models with low performance: {removed_students}')
 
 
 
@@ -418,15 +417,34 @@ if __name__ == '__main__':
 
 #TODO Long term
 '''
+0. Deep thinking and reasoning (w/ gpt?) about what’s next
+0.1 Zoom in on the first epoch - reduce number of iteratios (see message from KABI)
 1. Decode with likelihood- how are the students (different seed) changes over the epochs during fit?
 2. Then train on T1, T2... and train S0 again on T1
 3. try changing perturbation for an optimization one (like SGD), and add more T0 teachers (different seeds)
+4. add cross decoding ?
 
 Goal - find a model that does well on T1, should also do reasonably well on T0 or vice versa?
 
 
+TODO - Specific tasks, keep an open mind (Can be CHANGED!)
+1. Imporove style of graphs, plan ahead to make it easier before second run with data/new students
+2. Add students like before
+3. Add some teachers? perhaps with different perturbations
+Go to step 5 - to test for each epoch, rewrtie train(..) function : hmm_class.fit_em(params, prop, emissions, num_iters=1) , i.e. NUM_EPOCHS=1, and add a loop, and test each epoch ->
+Create a good student - duplciate teacher, and add some states I cannot rach (sanity check that it works)
 
-Alternatives:
+
+TODO - side taskquests
+- Update add_extranaous ring func to fit the new HMM. Use GPT
+
+1. In debug mode- how to run from a specific line while keeping the state? 
+2. Hot decode/reload ? Ask Community
+3. Finish all todo's quests
+
+
+
+Alternative tasks (archive):
 . ! Plan/compute algo for generalizing students (s_1..1,s_1..2...?) for 5 teachers (T5) - combinatorics computation:
 1->x->y where y>=x>=1
 . Generalize teachers and students using the algorithms I developed and evaluate on an unseen teacher T6
@@ -437,26 +455,6 @@ Alternatives:
 . Check dynamax and Claude for how to pertub teachers properly (so the likelihood won't surpass the teacher? Or perhaps it is ok) VX - return to this step
 
 
-TODO - side taskquestsa
-1. In debug mode- how to run from a specific line while keeping the state? 
-... Hot decode ? Ask Community
-
-2. Table shows students only good on one teacher and 0 on the other, and one teacher good on all?
-3. Cross decoding afterwards
-'''
-
-
-'''
-What have I done:
-1.  Perturbed teachers?
-2.  Trained, evaluated, and compared students and teachers over teachers...
-3.  Visualized initial true params emissions
-    Evaluate all on unseen teacher T3 V
-    Repeating each curriculum with many randomly initialized students. V
-    Visualize results: Use rings on teacher's data, and graph the dataframe's data V
-    Generalize student S_l V
-    Keep function extractions and organizations for teachers, etc. V
-    Fix 2D plotting V
 
 '''
 

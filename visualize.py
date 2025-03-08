@@ -3,48 +3,75 @@ import jax.numpy as jnp
 import networkx as nx
 import matplotlib.pyplot as plt
 from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
+import pandas as pd
+import os
 
 from hmmST import *
 
 
 'Plot with X = epochs, Y= decoding per teacher and likelihood'
-def plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs):
-    epochs = [i for i, _ in enumerate(loss)]  # Adjusting epochs as requested
+def plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs, csv_file="decoding_results.csv"):
+    if os.path.exists(csv_file):
+        print(f"Loading data from {csv_file}...")
+        df = pd.read_csv(csv_file)
+        epochs = df['Epoch'].tolist()
+        mean_loss = df['Mean_Loss'].tolist()
+        decodingST = df[['Decoding_T0_S', 'Decoding_T1_S', 'Decoding_T2_S']].values.tolist()
+        decodingTS = df[['Decoding_S_T0', 'Decoding_S_T1', 'Decoding_S_T2']].values.tolist()
+    else:
+        print(f"Saving data to {csv_file}...")
+        epochs = list(range(len(loss)))
+        mean_loss = [np.mean(epoch[0]).item() for epoch in loss]
 
-    fig, axes = plt.subplots(3, 3, figsize=(12, 12))
-    titles = ['T0', 'T1', 'T2']
-    
-    
-    mean_loss = [np.mean(epoch[0]).item() for epoch in loss]
+        # Convert decodingST and decodingTS to DataFrame
+        df_data = {
+            'Epoch': epochs,
+            'Mean_Loss': mean_loss,
+            'Decoding_T0_S': [d[0] for d in decodingST],
+            'Decoding_T1_S': [d[1] for d in decodingST],
+            'Decoding_T2_S': [d[2] for d in decodingST],
+            'Decoding_S_T0': [d[0] for d in decodingTS],
+            'Decoding_S_T1': [d[1] for d in decodingTS],
+            'Decoding_S_T2': [d[2] for d in decodingTS]
+        }
 
-    # Plot los
-    axes[0, 0].plot(epochs, mean_loss, label='Loss')
-    axes[0, 0].set_title(f'Loss - {titles[0]}')
-    axes[0, 0].set_xlabel('Epochs')
-    axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].legend()
+        df = pd.DataFrame(df_data)
+        df.to_csv(csv_file, index=False)
+
+    # Plotting
+    fig, axes = plt.subplots(3, 3, figsize=(14, 12), gridspec_kw={'height_ratios': [1, 2, 2]})
+
+    # Loss Plot
+    ax_loss = fig.add_subplot(3, 1, 1)
+    ax_loss.plot(epochs, mean_loss, label='Loss', color='black')
+    ax_loss.set_title('Training Loss', fontsize=14, pad=15)
+    ax_loss.set_xlabel('Epochs', fontsize=12)
+    ax_loss.set_ylabel('Loss', fontsize=12)
+    ax_loss.legend()
+    ax_loss.xaxis.set_tick_params(rotation=45)
+
+    # Adjust subplot spacing
+    plt.subplots_adjust(hspace=0.4, wspace=0.3)
 
     # Plot decoding T -> S
     for i in range(3):
         axes[1, i].plot(epochs, [d[i] for d in decodingST], label=f'Decoding T{i} → S')
-        axes[1, i].set_title(f'Decoding T{i} → S')
-        axes[1, i].set_xlabel('Epochs - 3')
+        axes[1, i].set_title(f'Decoding T{i} → S', fontsize=12, pad=10)
+        axes[1, i].set_xlabel('Epochs')
         axes[1, i].set_ylabel('Accuracy')
         axes[1, i].legend()
 
     # Plot decoding S -> T
     for i in range(3):
         axes[2, i].plot(epochs, [d[i] for d in decodingTS], label=f'Decoding S → T{i}')
-        axes[2, i].set_title(f'Decoding S → T{i}')
-        axes[2, i].set_xlabel('Epochs - 3')
+        axes[2, i].set_title(f'Decoding S → T{i}', fontsize=12, pad=10)
+        axes[2, i].set_xlabel('Epochs')
         axes[2, i].set_ylabel('Accuracy')
         axes[2, i].legend()
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig('./DecodingLossEpochs.png', dpi=300, bbox_inches='tight')
     plt.show()
-
-
 
 
 'Visualize performances'
