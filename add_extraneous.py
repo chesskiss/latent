@@ -66,32 +66,30 @@ def predict_proba(hmm, params, observations, back_to_3D=True):
 
 
 
+def is_diagonal(matrix):
+    """
+    Checks if a batch of JAX matrices is diagonal.
 
-def add_ring(model,ring_length=2,eps=0):
+    Args:
+        matrix (jnp.ndarray): The input batch of matrices (shape: (batch, N, N)).
+
+    Returns:
+        bool: True if all matrices in the batch are diagonal, False otherwise.
+    """
+    batch_size, N, _ = matrix.shape
+
+    # Extract the diagonals and reconstruct the diagonal matrix
+    diagonals = jnp.diagonal(matrix, axis1=-2, axis2=-1)  # (batch, N)
+    reconstructed = jnp.zeros_like(matrix).at[..., jnp.arange(N), jnp.arange(N)].set(diagonals)
+
+    return jnp.all(matrix == reconstructed)
+
+'''def add_ring(hmm_model, model,ring_length=2,eps=1e-5):
     new_model = deepcopy(model)
-    new_model.n_components = model.n_components * ring_length
-    # ring_transmat = jnp.roll(jnp.eye(ring_length),1,axis=1)
-    ring_transmat = jnp.eye(ring_length,k=1)
-    new_model.transmat_ = jnp.kron(model.transmat_,ring_transmat) + eps
-    new_model.transmat_ /= new_model.transmat_.sum(axis=1,keepdims=True)
-    # new_model.startprob_ = jnp.stack([model.startprob_]*ring_length).reshape(new_model.n_components) / ring_length
-    new_model.startprob_ = jnp.kron(
-        model.startprob_,
-        (jnp.arange(ring_length)==0).astype(float)
-    )  #jnp.stack([model.startprob_] * ring_length).reshape(new_model.n_components) / ring_length
-    # new_model.n_states = model.n_states * ring_length
-    print(new_model.means_.shape,new_model.covars_.shape)
-    new_model.means_ = jnp.concatenate([model.means_] * ring_length,axis=0)
-    covars = model.covars_
-    if model.covariance_type == "diag":
-        covars = jnp.einsum('ijj->ij',covars)
-    new_model.covars_ = jnp.concatenate([covars] * ring_length, axis=0)
-    return new_model
 
+    #Depends on the HMM initialization
+    new_model.n_components = model.n_components * ring_length 
 
-def add_ring(model,ring_length=2,eps=1e-5):
-    new_model = deepcopy(model)
-    new_model.n_components = model.n_components * ring_length
     # ring_transmat = jnp.roll(jnp.eye(ring_length),1,axis=1)
     ring_transmat = jnp.eye(ring_length,k=1)
     new_model.transmat_ = jnp.kron(ring_transmat, model.transmat_) + eps
@@ -104,8 +102,29 @@ def add_ring(model,ring_length=2,eps=1e-5):
     if model.covariance_type == "diag":
         covars = jnp.einsum('ijj->ij',covars)
     new_model.covars_ = jnp.concatenate([covars] * ring_length, axis=0)
-    return new_model
+    return new_model''' #OLD 
 
+
+
+def add_ring(initial_probs, transition_matrix, emission_means, emissions_cov, ring_length=2,eps=1e-5):    
+    new_states_num  = TRUE_NUM_STATES * ring_length
+    new_hmm = GaussianHMM(new_states_num, EMISSION_DIM)
+
+    ring_transmat   = jnp.eye(ring_length,k=1)
+    new_transition_matrix = jnp.kron(ring_transmat, transition_matrix) + eps
+    new_initial_probs = jnp.stack([initial_probs]*ring_length).reshape(new_states_num) / ring_length
+
+    new_emission_means = jnp.concatenate([emission_means] * ring_length,axis=0)
+    if is_diagonal(emissions_cov):
+        emissions_cov = jnp.einsum('ijj->ij',emissions_cov)
+    new_emissions_cov = jnp.concatenate([emissions_cov] * ring_length, axis=0)
+
+    S, S_props    = new_hmm.initialize(initial_probs=new_initial_probs,
+                                    transition_matrix=new_transition_matrix,
+                                    emission_means=new_emission_means,
+                                    emission_covariances=new_emissions_cov)
+    
+    return S, S_props, new_hmm
 
 
 # def predict_proba(hmm_model, observations, back_to_3D=False):

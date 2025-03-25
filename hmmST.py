@@ -111,14 +111,12 @@ def initial():
 
 
 'Initialize HMMs'
-def init_teachers():
-    initial_probs, transition_matrix, emission_means, emissions_cov = initial()
-    
+def init_teachers(initial_probs, transition_matrix, emission_means, emissions_cov):    
     T0, T0_props    = HMM.initialize(initial_probs=initial_probs,
                                     transition_matrix=transition_matrix,
                                     emission_means=emission_means,
                                     emission_covariances=emissions_cov)
-    
+
 
     teacher_num = 1
     init, trans, means, covs = perturbation(teacher_num, epsilon, 
@@ -126,7 +124,7 @@ def init_teachers():
                                             transition_matrix, 
                                             emission_means, 
                                             emissions_cov)
-    T1, _           = HMM.initialize(initial_probs=init, transition_matrix=trans,
+    T1, T1_props            = HMM.initialize(initial_probs=init, transition_matrix=trans,
                                     emission_means=means, emission_covariances=covs)
     
     init, trans, means, covs = perturbation(2, epsilon, 
@@ -134,22 +132,18 @@ def init_teachers():
                                             trans, 
                                             means, 
                                             covs)
-    T2, _           = HMM.initialize(initial_probs=init, transition_matrix=trans,
+    T2, T2_props            = HMM.initialize(initial_probs=init, transition_matrix=trans,
                                     emission_means=means, emission_covariances=covs)
 
-    return T0, T1, T2
+    return [T0, T1, T2], [T0_props, T1_props, T2_props]
 
 
-
-def create_students(teacher, students_num):
+'This will create students with 100% accuracy on liklihood (emissions), but different structure and hence, high decoding (error value)'
+def create_students(initial_probs, transition_matrix, emission_means, emissions_cov ):
     students = []
-    # Add perfect student
-    #TODO atm not necessary. Just replace main code and run!
-
-    # Add poor student
-    for i in range(1, students_num+1):
-        student = add_ring(teacher, ring_length=i)
-        students.append(student)
+    for n in range(1, STUDENTS_NUM+1): # n = number of rings
+        student_params, props, hmm_type = add_ring(initial_probs, transition_matrix, emission_means, emissions_cov, ring_length=n)
+        students.append([student_params, props, hmm_type])
     return students
 
 
@@ -183,30 +177,45 @@ def dgen(teachers):
 
 
 'Train/fit the HMMs'
-def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em
-    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions, num_epochs=1, optimizer=optax.adam(1e-5)) for param, prop in zip(*[params, props])]) # for fit_em use max_iter
+def train(teachers, students):  #can also try with .fit_em
+    # For fit_em use max_iter # optimizer=optax.adam(LEARNING_RATE). Look at ssm.py to find fit_sgd implementation
+    fit = lambda students, emissions : zip(*[[prop, hmm_type.fit_sgd(param, prop, emissions, num_epochs=ITER)] for param, prop, hmm_type in students])
     teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions) 
 
-
-    loss        = []
+    results = {"Likelihood over" : [f'T{i}' for i, _ in enumerate(teachers)]}
+    likelihoods = []
     decodingST  = []
     decodingTS  = []
     for i in range(NUM_EPOCHS):
-        print(f'checkpoint - train - iteraion: {i}')
+        print(f'Train - iteraion: {i}')
+        epoch_decodingST = []
+        epoch_decodingTS = []
+        epoch_likelihoods = []
 
-        print(f'checkpoint - train - loss : {loss}')
-        for model in S:
-            decodingST.append([decoding(hmm_student, model, HMM, T, test) for T, train, test in teachers])
-            print(f'checkpoint - train - decoding TS : {decodingST}')
-            decodingTS.append([decoding(HMM, T, hmm_student, model, test) for T, train, test in teachers])
-            print(f'checkpoint - train - decoding ST : {decodingTS}')
+        for student in students:
+            hmm_student = student[2]
+            params_student = student[0]
+            epoch_decodingST.append([decoding(hmm_student, params_student, HMM, T, test) for T, train, test in teachers])
+            epoch_decodingTS.append([decoding(HMM, T, hmm_student, params_student, test) for T, train, test in teachers])
+            epoch_likelihoods.append([likelihood(hmm_student, params_student, T, train, test) for T, train, test in teachers])
 
-        S, l   = fit(hmm_student, S, S_props, teachers[0][1])
-        loss = np.array(l) if len(loss) == 0 else np.concatenate((loss, l), axis=0)
-        print(f'checkpoint - train - end of iteration')
+        decodingTS.append(epoch_decodingST)
+        decodingST.append(epoch_decodingTS)
+        likelihoods.append(epoch_likelihoods)
 
+        students, loss   = fit(students, teachers[0][1])
 
-    print(f'l = {loss},  {decodingST} ,  {decodingTS}  ')
+    '''
+    The format of decoding and liklihoods:
+    epoch        S0                               S1
+    1       [[T0, T1, T2] [T0, T1, T2] ... ]
+    2       ...
+    ..
+
+    In the csv each element is a 2D matrix, the rows represent 
+    '''
+
+    print(f'l = {likelihoods},  {decodingST} ,  {decodingTS}  ')
     
     # S1, _   = fit(hmm_student, S, S_props, teachers[1][1])
     # S00, _  = fit(hmm_student, S0, S_props, teachers[0][1])
@@ -216,7 +225,8 @@ def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em
     # S_l0, _ = fit(hmm_student, S_l, S_l_props, T0_emissions_train)
 
     # return S0, S1, S00, S01, S11
-    return loss, decodingST, decodingTS
+
+    return likelihoods, decodingST, decodingTS
 
 
 
@@ -281,9 +291,23 @@ def df_conv(results):
     
     return df
 
+def likelihood(student_type, student_params, teacher, teacher_train_obs, test_obs):
+    baseline_model = GaussianMixture(n_components=1)
+    base = lambda train,test: baseline_model.fit(
+            train.reshape(-1, EMISSION_DIM)
+            ).score_samples(
+                test.reshape(-1, EMISSION_DIM)
+            ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
+    evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
+    ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
+    # print(f'Base liklihood: {base(teacher_train_obs, test_obs)}')
+    # print(f'Teacher liklihood: {ev(HMM, teacher, test_obs)}')
+    # print(f'Student liklihood: {ev(student_type, student_params, test_obs)}')
+    return float((ev(student_type, student_params, test_obs)-base(teacher_train_obs, test_obs))/(ev(HMM, teacher, test_obs)-base(teacher_train_obs, test_obs)))
 
 
-def likelihood(students, teachers):
+
+def likelihoods(students, teachers):
     'Baseline option 1'
     # n       = lambda data, new_data : multivariate_normal(mean=np.mean(data, axis=(0,1)), cov=np.cov(data.reshape(-1, EMISSION_DIM), rowvar=False)).pdf(new_data)
     # base    = lambda train, test : np.log(n(train, test)).sum(axis=1).mean(axis=0)
@@ -373,32 +397,33 @@ def decode(students, teachers):
 if __name__ == '__main__':
     print('checkpoint 1')
 
-    # # if True:
-    #     # results = load_csv()
+    if True:
+        initial_probs, transition_matrix, emission_means, emissions_cov = initial()
+        [T0, T1, T2], [T0_props, T1_props, T2_props] = init_teachers(initial_probs, transition_matrix, emission_means, emissions_cov)
+        teachers = [T0, T1, T2]
+        teachers = dgen(teachers)
 
-    # # else: 
-    # T0, T1, T2 = init_teachers()
-    # teachers = [T0, T1, T2]
-    # teachers = dgen(teachers)
+        print('checkpoint 2')
+        # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
+        students = []
+        for num in range(MIN_S_STATE, MAX_S_STATE):
+            # hmm_student = GaussianHMM(num, EMISSION_DIM)
+            # S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+            
+            students = create_students(initial_probs, transition_matrix, emission_means, emissions_cov )
 
-    # print('checkpoint 2')
-    # # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
-    # students = []
-    # for num in range(MIN_S_STATE, MAX_S_STATE):
-    #     hmm_student = GaussianHMM(num, EMISSION_DIM)
-    #     S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-    #     # students_data = train(teachers, S, S_props, hmm_student)
-    #     # students.extend([s, hmm_student] for s in students_data)
-    #     print('checkpoint 3')
-    #     loss, decodingST, decodingTS = train(teachers, S, S_props, hmm_student)
+            # students_data = train(teachers, S, S_props, hmm_student) #OLD
+            # students.extend([s, hmm_student] for s in students_data)
 
-    # print('checkpoint 4')
+            print('checkpoint 3')
+            like, decodingST, decodingTS = train(teachers, students)
 
-    # plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs=NUM_EPOCHS)
+        print('checkpoint 4')
 
+        plot_decodingEpochs(like, decodingST, decodingTS)
 
-    plot_decodingEpochs(None, None, None, num_epochs=NUM_EPOCHS)
-
+    else:
+        plot_decodingEpochs(None, None, None)
 
 
 

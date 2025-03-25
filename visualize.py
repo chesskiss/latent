@@ -5,73 +5,140 @@ import matplotlib.pyplot as plt
 from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
 import pandas as pd
 import os
-
+import json
 from hmmST import *
+from macros import *
 
 
 'Plot with X = epochs, Y= decoding per teacher and likelihood'
-def plot_decodingEpochs(loss, decodingST, decodingTS, num_epochs, csv_file="decoding_results.csv"):
-    if os.path.exists(csv_file):
-        print(f"Loading data from {csv_file}...")
-        df = pd.read_csv(csv_file)
-        epochs = df['Epoch'].tolist()
-        mean_loss = df['Mean_Loss'].tolist()
-        decodingST = df[['Decoding_T0_S', 'Decoding_T1_S', 'Decoding_T2_S']].values.tolist()
-        decodingTS = df[['Decoding_S_T0', 'Decoding_S_T1', 'Decoding_S_T2']].values.tolist()
+def plot_decodingEpochs(likelihoods, decodingST, decodingTS, csv_file_name='decoding_data'):
+    csv_path = f'{csv_file_name}.csv'
+    if likelihoods is None:
+        df = pd.read_csv(csv_path)
+        
+        # Ensure required columns exist
+        required_columns = {'epoch', 'likelihood', 'decodingST', 'decodingTS'}
+        if not required_columns.issubset(df.columns):
+            raise ValueError(f"CSV file missing required columns: {required_columns - set(df.columns)}")
+
+        # Determine number of epochs and students dynamically
+        num_epochs = df['epoch'].nunique()
+        num_students = len(json.loads(df['likelihood'].iloc[0]))  # Extract from first row
+        num_teachers = len(json.loads(df['likelihood'].iloc[0])[0])  # Extract from first student's data
+
+        # Initialize empty arrays
+        likelihoods = np.zeros((num_epochs, num_students, num_teachers))
+        decodingST = np.zeros((num_epochs, num_students, num_teachers))
+        decodingTS = np.zeros((num_epochs, num_students, num_teachers))
+
+        # Populate arrays
+        for _, row in df.iterrows():
+            e = int(row['epoch'])
+            likelihood_matrix = np.array(json.loads(row['likelihood']))
+            decodingST_matrix = np.array(json.loads(row['decodingST']))
+            decodingTS_matrix = np.array(json.loads(row['decodingTS']))
+
+            likelihoods[e] = likelihood_matrix
+            decodingST[e] = decodingST_matrix
+            decodingTS[e] = decodingTS_matrix
+
+
+        # # Load data from CSV and reshape into 3D arrays
+        # df = pd.read_csv(csv_path)
+        
+        # num_teachers = 3  # Fixed number of teachers
+        # num_students = 3  # Calculate number of students
+        
+        # likelihoods = np.zeros((50, num_teachers, num_students))
+        # decodingST = np.zeros((50, num_teachers, num_students))
+        # decodingTS = np.zeros((50, num_teachers, num_students))
+        
+        # epochs = list(range(50))
+        # s=0
+        # for i, row in df.iterrows():
+        #     epoch = i//9
+        #     teacher_idx = i % num_teachers
+        #     student_idx = (i // num_teachers) % num_students
+        #     s+=1
+        #     likelihoods[epoch, teacher_idx, student_idx] = row['likelihood']
+        #     decodingST[epoch, teacher_idx, student_idx] = row['decodingST']
+        #     decodingTS[epoch, teacher_idx, student_idx] = row['decodingTS']
+        # print(s)
+
+
+    elif os.path.exists(csv_path):
+        existing_files = [f for f in os.listdir('.') if f.startswith(f'{csv_file_name}_') and f.endswith('.csv')]
+        next_index = len(existing_files) + 1
+        csv_path = f'{csv_file_name}_{next_index}_{NUM_EPOCHS}Epochs.csv'
+
+        # Compute values dynamically and save them
+        data = {'epoch': [], 'likelihood': [], 'decodingST': [], 'decodingTS': []}
+
+        for e in range(NUM_EPOCHS):
+            data['epoch'].append(e)
+            data['likelihood'].append(json.dumps(likelihoods[e]))
+            data['decodingST'].append(json.dumps(decodingST[e]))
+            data['decodingTS'].append(json.dumps(decodingTS[e]))
+
+        df = pd.DataFrame(data)
+        df.to_csv(csv_path, index=False)
+
     else:
-        print(f"Saving data to {csv_file}...")
-        epochs = list(range(len(loss)))
-        mean_loss = [np.mean(epoch[0]).item() for epoch in loss]
+        # Compute values dynamically and save them
 
-        # Convert decodingST and decodingTS to DataFrame
-        df_data = {
-            'Epoch': epochs,
-            'Mean_Loss': mean_loss,
-            'Decoding_T0_S': [d[0] for d in decodingST],
-            'Decoding_T1_S': [d[1] for d in decodingST],
-            'Decoding_T2_S': [d[2] for d in decodingST],
-            'Decoding_S_T0': [d[0] for d in decodingTS],
-            'Decoding_S_T1': [d[1] for d in decodingTS],
-            'Decoding_S_T2': [d[2] for d in decodingTS]
-        }
+        data = {'epoch': [], 'likelihood': [], 'decodingST': [], 'decodingTS': []}
 
-        df = pd.DataFrame(df_data)
-        df.to_csv(csv_file, index=False)
+        for e in range(NUM_EPOCHS):
+            data['epoch'].append(e)
+            data['likelihood'].append(json.dumps(likelihoods[e]))
+            data['decodingST'].append(json.dumps(decodingST[e]))
+            data['decodingTS'].append(json.dumps(decodingTS[e]))
+
+        df = pd.DataFrame(data)
+        df.to_csv(csv_path, index=False)
+
+
+    epochs = range(len(likelihoods))
+    num_students = len(likelihoods[0])
+    num_teachers = likelihoods.shape[2] if isinstance(likelihoods, np.ndarray) else len(likelihoods[0][0])
 
     # Plotting
-    fig, axes = plt.subplots(3, 3, figsize=(14, 12), gridspec_kw={'height_ratios': [1, 2, 2]})
+    fig, axes = plt.subplots(3, 3, figsize=(12, 12), sharey='row')
+    titles = ['T0', 'T1', 'T2']
+    colors = plt.cm.viridis(np.linspace(0, 1, num_students))  # Use color map for students
 
-    # Loss Plot
-    ax_loss = fig.add_subplot(3, 1, 1)
-    ax_loss.plot(epochs, mean_loss, label='Loss', color='black')
-    ax_loss.set_title('Training Loss', fontsize=14, pad=15)
-    ax_loss.set_xlabel('Epochs', fontsize=12)
-    ax_loss.set_ylabel('Loss', fontsize=12)
-    ax_loss.legend()
-    ax_loss.xaxis.set_tick_params(rotation=45)
+    # Plot likelihoods (row 1)
+    for t in range(num_teachers):
+        for s in range(num_students):
+            axes[0, t].plot(epochs, [l[s][t] for l in likelihoods], label=f'Student {s}', color=colors[s])
+        axes[0, t].set_title(f'Likelihood - {titles[t]}')
+        axes[0, t].set_xlabel('Epochs')
+        axes[0, t].set_ylabel('Likelihood')
+        axes[0, t].legend()
 
-    # Adjust subplot spacing
-    plt.subplots_adjust(hspace=0.4, wspace=0.3)
+    # Plot decoding T -> S (row 2)
+    for t in range(num_teachers):
+        for s in range(num_students):
+            axes[1, t].plot(epochs, [d[s][t] for d in decodingST], label=f'Student {s}', color=colors[s])
+        axes[1, t].set_title(f'Decoding T{t} → S')
+        axes[1, t].set_xlabel('Epochs')
+        axes[1, t].set_ylabel('Error')
+        axes[1, t].legend()
 
-    # Plot decoding T -> S
-    for i in range(3):
-        axes[1, i].plot(epochs, [d[i] for d in decodingST], label=f'Decoding T{i} → S')
-        axes[1, i].set_title(f'Decoding T{i} → S', fontsize=12, pad=10)
-        axes[1, i].set_xlabel('Epochs')
-        axes[1, i].set_ylabel('Accuracy')
-        axes[1, i].legend()
+    # Plot decoding S -> T (row 3)
+    for t in range(num_teachers):
+        for s in range(num_students):
+            axes[2, t].plot(epochs, [d[s][t] for d in decodingTS], label=f'Student {s}', color=colors[s])
+        axes[2, t].set_title(f'Decoding S → T{t}')
+        axes[2, t].set_xlabel('Epochs')
+        axes[2, t].set_ylabel('Error')
+        axes[2, t].legend()
 
-    # Plot decoding S -> T
-    for i in range(3):
-        axes[2, i].plot(epochs, [d[i] for d in decodingTS], label=f'Decoding S → T{i}')
-        axes[2, i].set_title(f'Decoding S → T{i}', fontsize=12, pad=10)
-        axes[2, i].set_xlabel('Epochs')
-        axes[2, i].set_ylabel('Accuracy')
-        axes[2, i].legend()
-
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-    plt.savefig('./DecodingLossEpochs.png', dpi=300, bbox_inches='tight')
+    plt.tight_layout()
+    plt.savefig('./DecodingLikelihoodEpochs.png', dpi=300, bbox_inches='tight')
     plt.show()
+
+
 
 
 'Visualize performances'
