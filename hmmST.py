@@ -111,12 +111,14 @@ def initial():
 
 
 'Initialize HMMs'
-def init_teachers(initial_probs, transition_matrix, emission_means, emissions_cov):    
+def init_teachers():
+    initial_probs, transition_matrix, emission_means, emissions_cov = initial()
+    
     T0, T0_props    = HMM.initialize(initial_probs=initial_probs,
                                     transition_matrix=transition_matrix,
                                     emission_means=emission_means,
                                     emission_covariances=emissions_cov)
-
+    
 
     teacher_num = 1
     init, trans, means, covs = perturbation(teacher_num, epsilon, 
@@ -124,7 +126,7 @@ def init_teachers(initial_probs, transition_matrix, emission_means, emissions_co
                                             transition_matrix, 
                                             emission_means, 
                                             emissions_cov)
-    T1, T1_props            = HMM.initialize(initial_probs=init, transition_matrix=trans,
+    T1, _           = HMM.initialize(initial_probs=init, transition_matrix=trans,
                                     emission_means=means, emission_covariances=covs)
     
     init, trans, means, covs = perturbation(2, epsilon, 
@@ -132,18 +134,22 @@ def init_teachers(initial_probs, transition_matrix, emission_means, emissions_co
                                             trans, 
                                             means, 
                                             covs)
-    T2, T2_props            = HMM.initialize(initial_probs=init, transition_matrix=trans,
+    T2, _           = HMM.initialize(initial_probs=init, transition_matrix=trans,
                                     emission_means=means, emission_covariances=covs)
 
-    return [T0, T1, T2], [T0_props, T1_props, T2_props]
+    return T0, T1, T2
 
 
-'This will create students with 100% accuracy on liklihood (emissions), but different structure and hence, high decoding (error value)'
-def create_students(initial_probs, transition_matrix, emission_means, emissions_cov ):
+
+def create_students(teacher, students_num):
     students = []
-    for n in range(1, STUDENTS_NUM+1): # n = number of rings
-        student_params, props, hmm_type = add_ring(initial_probs, transition_matrix, emission_means, emissions_cov, ring_length=n)
-        students.append([student_params, props, hmm_type])
+    # Add perfect student
+    #TODO atm not necessary. Just replace main code and run!
+
+    # Add poor student
+    for i in range(1, students_num+1):
+        student = add_ring(teacher, ring_length=i)
+        students.append(student)
     return students
 
 
@@ -177,10 +183,10 @@ def dgen(teachers):
 
 
 'Train/fit the HMMs'
-def train(teachers, students):  #can also try with .fit_em
-    # For fit_em use max_iter # optimizer=optax.adam(LEARNING_RATE). Look at ssm.py to find fit_sgd implementation
-    fit = lambda students, emissions : zip(*[[prop, hmm_type.fit_sgd(param, prop, emissions, num_epochs=ITER)] for param, prop, hmm_type in students])
+def train(teachers, S, S_props, hmm_student):  #can also try with .fit_em
+    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions, num_epochs=ITER) for param, prop in zip(*[params, props])]) # for fit_em use max_iter # optimizer=optax.adam(LEARNING_RATE)
     teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions) 
+    fit_0 = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions) for param, prop in zip(*[params, props])]) # for fit_em use max_iter # optimizer=optax.adam(LEARNING_RATE)
 
     results = {"Likelihood over" : [f'T{i}' for i, _ in enumerate(teachers)]}
     likelihoods = []
@@ -192,18 +198,16 @@ def train(teachers, students):  #can also try with .fit_em
         epoch_decodingTS = []
         epoch_likelihoods = []
 
-        for student in students:
-            hmm_student = student[2]
-            params_student = student[0]
-            epoch_decodingST.append([decoding(hmm_student, params_student, HMM, T, test) for T, train, test in teachers])
-            epoch_decodingTS.append([decoding(HMM, T, hmm_student, params_student, test) for T, train, test in teachers])
-            epoch_likelihoods.append([likelihood(hmm_student, params_student, T, train, test) for T, train, test in teachers])
+        for student in S:
+            epoch_decodingST.append([decoding(hmm_student, student, HMM, T, test) for T, train, test in teachers])
+            epoch_decodingTS.append([decoding(HMM, T, hmm_student, student, test) for T, train, test in teachers])
+            epoch_likelihoods.append([likelihood(hmm_student, student, T, train, test) for T, train, test in teachers])
 
         decodingTS.append(epoch_decodingST)
         decodingST.append(epoch_decodingTS)
         likelihoods.append(epoch_likelihoods)
 
-        students, loss   = fit(students, teachers[0][1])
+        S, loss   = fit_0(hmm_student, S, S_props, teachers[0][1])
 
     '''
     The format of decoding and liklihoods:
@@ -398,8 +402,7 @@ if __name__ == '__main__':
     print('checkpoint 1')
 
     if True:
-        initial_probs, transition_matrix, emission_means, emissions_cov = initial()
-        [T0, T1, T2], [T0_props, T1_props, T2_props] = init_teachers(initial_probs, transition_matrix, emission_means, emissions_cov)
+        T0, T1, T2 = init_teachers()
         teachers = [T0, T1, T2]
         teachers = dgen(teachers)
 
@@ -407,16 +410,12 @@ if __name__ == '__main__':
         # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
         students = []
         for num in range(MIN_S_STATE, MAX_S_STATE):
-            # hmm_student = GaussianHMM(num, EMISSION_DIM)
-            # S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
-            
-            students = create_students(initial_probs, transition_matrix, emission_means, emissions_cov )
-
-            # students_data = train(teachers, S, S_props, hmm_student) #OLD
+            hmm_student = GaussianHMM(num, EMISSION_DIM)
+            S, S_props = zip(*[hmm_student.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+            # students_data = train(teachers, S, S_props, hmm_student)
             # students.extend([s, hmm_student] for s in students_data)
-
             print('checkpoint 3')
-            like, decodingST, decodingTS = train(teachers, students)
+            like, decodingST, decodingTS = train(teachers, S, S_props, hmm_student)
 
         print('checkpoint 4')
 
