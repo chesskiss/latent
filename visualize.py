@@ -11,60 +11,42 @@ from macros import *
 
 
 'Plot with X = epochs, Y= decoding per teacher and likelihood'
-def plot_decodingEpochs(likelihoods, decodingST, decodingTS, csv_file_name='decoding_data'):
+def plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodingTS, csv_file_name='decoding_data'):
     csv_path = f'{csv_file_name}.csv'
-    if likelihoods is None:
+    
+    if train_likelihoods is None:
         df = pd.read_csv(csv_path)
         
         # Ensure required columns exist
-        required_columns = {'epoch', 'likelihood', 'decodingST', 'decodingTS'}
+        required_columns = {'epoch', 'train_likelihoods', 'test_likelihoods', 'decodingST', 'decodingTS'}
         if not required_columns.issubset(df.columns):
             raise ValueError(f"CSV file missing required columns: {required_columns - set(df.columns)}")
 
         # Determine number of epochs and students dynamically
         num_epochs = df['epoch'].nunique()
-        num_students = len(json.loads(df['likelihood'].iloc[0]))  # Extract from first row
-        num_teachers = len(json.loads(df['likelihood'].iloc[0])[0])  # Extract from first student's data
+        num_students = len(json.loads(df['train_likelihoods'].iloc[0]))  # Extract from first row
+        num_teachers = len(json.loads(df['train_likelihoods'].iloc[0])[0])  # Extract from first student's data
 
-        # Initialize empty arrays
-        likelihoods = np.zeros((num_epochs, num_students, num_teachers))
+        data = {'epoch': [], 'train_likelihoods': [], 'test_likelihoods': [], 'decodingST': [], 'decodingTS': []}
+
+        # Update loading logic
         decodingST = np.zeros((num_epochs, num_students, num_teachers))
         decodingTS = np.zeros((num_epochs, num_students, num_teachers))
+        train_likelihoods = np.zeros((num_epochs, num_students, num_teachers))
+        test_likelihoods = np.zeros((num_epochs, num_students, num_teachers))
 
         # Populate arrays
         for _, row in df.iterrows():
             e = int(row['epoch'])
-            likelihood_matrix = np.array(json.loads(row['likelihood']))
+            train_likelihood_matrix = np.array(json.loads(row['train_likelihoods']))
+            test_likelihood_matrix = np.array(json.loads(row['test_likelihoods']))
             decodingST_matrix = np.array(json.loads(row['decodingST']))
             decodingTS_matrix = np.array(json.loads(row['decodingTS']))
 
-            likelihoods[e] = likelihood_matrix
+            train_likelihoods[e] = train_likelihood_matrix
+            test_likelihoods[e] = test_likelihood_matrix
             decodingST[e] = decodingST_matrix
             decodingTS[e] = decodingTS_matrix
-
-
-        # # Load data from CSV and reshape into 3D arrays
-        # df = pd.read_csv(csv_path)
-        
-        # num_teachers = 3  # Fixed number of teachers
-        # num_students = 3  # Calculate number of students
-        
-        # likelihoods = np.zeros((50, num_teachers, num_students))
-        # decodingST = np.zeros((50, num_teachers, num_students))
-        # decodingTS = np.zeros((50, num_teachers, num_students))
-        
-        # epochs = list(range(50))
-        # s=0
-        # for i, row in df.iterrows():
-        #     epoch = i//9
-        #     teacher_idx = i % num_teachers
-        #     student_idx = (i // num_teachers) % num_students
-        #     s+=1
-        #     likelihoods[epoch, teacher_idx, student_idx] = row['likelihood']
-        #     decodingST[epoch, teacher_idx, student_idx] = row['decodingST']
-        #     decodingTS[epoch, teacher_idx, student_idx] = row['decodingTS']
-        # print(s)
-
 
     elif os.path.exists(csv_path):
         existing_files = [f for f in os.listdir('.') if f.startswith(f'{csv_file_name}_') and f.endswith('.csv')]
@@ -72,11 +54,12 @@ def plot_decodingEpochs(likelihoods, decodingST, decodingTS, csv_file_name='deco
         csv_path = f'{csv_file_name}_{next_index}_{NUM_EPOCHS}Epochs.csv'
 
         # Compute values dynamically and save them
-        data = {'epoch': [], 'likelihood': [], 'decodingST': [], 'decodingTS': []}
+        data = {'epoch': [], 'train_likelihoods': [], 'test_likelihoods': [], 'decodingST': [], 'decodingTS': []}
 
         for e in range(NUM_EPOCHS):
             data['epoch'].append(e)
-            data['likelihood'].append(json.dumps(likelihoods[e]))
+            data['train_likelihoods'].append(json.dumps(train_likelihoods[e]))
+            data['test_likelihoods'].append(json.dumps(test_likelihoods[e]))
             data['decodingST'].append(json.dumps(decodingST[e]))
             data['decodingTS'].append(json.dumps(decodingTS[e]))
 
@@ -86,11 +69,12 @@ def plot_decodingEpochs(likelihoods, decodingST, decodingTS, csv_file_name='deco
     else:
         # Compute values dynamically and save them
 
-        data = {'epoch': [], 'likelihood': [], 'decodingST': [], 'decodingTS': []}
+        data = {'epoch': [], 'train_likelihoods': [], 'test_likelihoods': [], 'decodingST': [], 'decodingTS': []}
 
         for e in range(NUM_EPOCHS):
             data['epoch'].append(e)
-            data['likelihood'].append(json.dumps(likelihoods[e]))
+            data['train_likelihoods'].append(json.dumps(train_likelihoods[e]))
+            data['test_likelihoods'].append(json.dumps(test_likelihoods[e]))
             data['decodingST'].append(json.dumps(decodingST[e]))
             data['decodingTS'].append(json.dumps(decodingTS[e]))
 
@@ -98,9 +82,9 @@ def plot_decodingEpochs(likelihoods, decodingST, decodingTS, csv_file_name='deco
         df.to_csv(csv_path, index=False)
 
 
-    epochs = range(len(likelihoods))
-    num_students = len(likelihoods[0])
-    num_teachers = likelihoods.shape[2] if isinstance(likelihoods, np.ndarray) else len(likelihoods[0][0])
+    epochs = range(len(train_likelihoods))
+    num_students = len(train_likelihoods[0])
+    num_teachers = train_likelihoods.shape[2] if isinstance(train_likelihoods, np.ndarray) else len(train_likelihoods[0][0])
 
     # Plotting
     fig, axes = plt.subplots(3, 3, figsize=(12, 12), sharey='row')
@@ -110,7 +94,8 @@ def plot_decodingEpochs(likelihoods, decodingST, decodingTS, csv_file_name='deco
     # Plot likelihoods (row 1)
     for t in range(num_teachers):
         for s in range(num_students):
-            axes[0, t].plot(epochs, [l[s][t] for l in likelihoods], label=f'Student {s}', color=colors[s])
+            axes[0, t].plot(epochs, [l[s][t] for l in train_likelihoods], label=f'Train Student {s}', color=colors[s], linestyle='--')
+            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods], label=f'Test Student {s}', color=colors[s], linestyle='-')
         axes[0, t].set_title(f'Likelihood - {titles[t]}')
         axes[0, t].set_xlabel('Epochs')
         axes[0, t].set_ylabel('Likelihood')

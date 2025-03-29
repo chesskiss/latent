@@ -110,20 +110,23 @@ def add_ring(initial_probs, transition_matrix, emission_means, emissions_cov, ri
     new_states_num  = TRUE_NUM_STATES * ring_length
     new_hmm = GaussianHMM(new_states_num, EMISSION_DIM)
 
-    ring_transmat   = jnp.eye(ring_length,k=1)
-    new_transition_matrix = jnp.kron(ring_transmat, transition_matrix) + eps
-    new_initial_probs = jnp.stack([initial_probs]*ring_length).reshape(new_states_num) / ring_length
+    ring_transmat           = jnp.eye(ring_length,k=1)
+    new_transition_matrix   = jnp.kron(ring_transmat, transition_matrix) + eps
+    new_initial_probs       = jnp.stack([initial_probs]*ring_length).reshape(new_states_num) / ring_length
 
-    new_emission_means = jnp.concatenate([emission_means] * ring_length,axis=0)
-    if is_diagonal(emissions_cov):
-        emissions_cov = jnp.einsum('ijj->ij',emissions_cov)
+    new_emission_means  = jnp.concatenate([emission_means] * ring_length,axis=0)
+
+    new_emissions_cov   = emissions_cov
+    # if is_diagonal(emissions_cov):
+    #     new_emissions_cov = jnp.einsum('ijj->ij',new_emissions_cov)
     new_emissions_cov = jnp.concatenate([emissions_cov] * ring_length, axis=0)
+    
 
     S, S_props    = new_hmm.initialize(initial_probs=new_initial_probs,
                                     transition_matrix=new_transition_matrix,
                                     emission_means=new_emission_means,
                                     emission_covariances=new_emissions_cov)
-    
+ 
     return S, S_props, new_hmm
 
 
