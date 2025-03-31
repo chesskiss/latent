@@ -6,13 +6,12 @@ from dynamax.utils.plotting import CMAP, COLORS, white_to_color_cmap
 import pandas as pd
 import os
 import json
-from hmmST import *
 from macros import *
 
 
-'Plot with X = epochs, Y= decoding per teacher and likelihood'
-def plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodingTS, csv_file_name='decoding_data'):
-    csv_path = f'{csv_file_name}.csv'
+'Plot with X = epochs, Y= decoding per teacher and likelihood only for teachers OR stundets'
+def plot_decodingEpochs_singleModelType(train_likelihoods=None, test_likelihoods=None, decodingST=None, decodingTS=None, csv_file_name='singleModelType_data'):
+    csv_path = f'./csv_data/{csv_file_name}.csv'
     
     if train_likelihoods is None:
         df = pd.read_csv(csv_path)
@@ -51,7 +50,7 @@ def plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodin
     elif os.path.exists(csv_path):
         existing_files = [f for f in os.listdir('.') if f.startswith(f'{csv_file_name}_') and f.endswith('.csv')]
         next_index = len(existing_files) + 1
-        csv_path = f'{csv_file_name}_{next_index}_{NUM_EPOCHS}Epochs.csv'
+        csv_path = f'./csv_data/{csv_file_name}_{next_index}.csv'
 
         # Compute values dynamically and save them
         data = {'epoch': [], 'train_likelihoods': [], 'test_likelihoods': [], 'decodingST': [], 'decodingTS': []}
@@ -89,13 +88,13 @@ def plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodin
     # Plotting
     fig, axes = plt.subplots(3, 3, figsize=(12, 12), sharey='row')
     titles = ['T0', 'T1', 'T2']
-    colors = plt.cm.viridis(np.linspace(0, 1, num_students))  # Use color map for students
+    colors = plt.cm.viridis(np.linspace(0, 1, num_students))  # Use color map for Models
 
     # Plot likelihoods (row 1)
     for t in range(num_teachers):
         for s in range(num_students):
-            axes[0, t].plot(epochs, [l[s][t] for l in train_likelihoods], label=f'Train Student {s}', color=colors[s], linestyle='--')
-            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods], label=f'Test Student {s}', color=colors[s], linestyle='-')
+            axes[0, t].plot(epochs, [l[s][t] for l in train_likelihoods], label=f'Train Model {s}', color=colors[s], linestyle='--')
+            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods], label=f'Test Model {s}', color=colors[s], linestyle='-')
         axes[0, t].set_title(f'Likelihood - {titles[t]}')
         axes[0, t].set_xlabel('Epochs')
         axes[0, t].set_ylabel('Likelihood')
@@ -104,7 +103,7 @@ def plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodin
     # Plot decoding T -> S (row 2)
     for t in range(num_teachers):
         for s in range(num_students):
-            axes[1, t].plot(epochs, [d[s][t] for d in decodingST], label=f'Student {s}', color=colors[s])
+            axes[1, t].plot(epochs, [d[s][t] for d in decodingST], label=f'Model {s}', color=colors[s])
         axes[1, t].set_title(f'Decoding T{t} → S')
         axes[1, t].set_xlabel('Epochs')
         axes[1, t].set_ylabel('Error')
@@ -113,17 +112,136 @@ def plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodin
     # Plot decoding S -> T (row 3)
     for t in range(num_teachers):
         for s in range(num_students):
-            axes[2, t].plot(epochs, [d[s][t] for d in decodingTS], label=f'Student {s}', color=colors[s])
+            axes[2, t].plot(epochs, [d[s][t] for d in decodingTS], label=f'Model {s}', color=colors[s])
         axes[2, t].set_title(f'Decoding S → T{t}')
         axes[2, t].set_xlabel('Epochs')
         axes[2, t].set_ylabel('Error')
         axes[2, t].legend()
 
     plt.tight_layout()
-    plt.savefig('./DecodingLikelihoodEpochs.png', dpi=300, bbox_inches='tight')
+    plt.savefig('./visualization/DecodingLikelihoodEpochs.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
+
+'Plot with X = epochs, Y= decoding per teacher and likelihood for both teachers AND students'
+def plot_decodingEpochs(train_likelihoods_students=None, test_likelihoods_students=None, decodingST_students=None, decodingTS_students=None,
+                        train_likelihoods_teachers=None, test_likelihoods_teachers=None, decodingST_teachers=None, decodingTS_teachers=None,
+                        s_csv_file_name='s_decoding_data', t_csv_file_name='t_decoding_data'):
+    
+    s_csv_path = f'./csv_data/{s_csv_file_name}.csv'
+    t_csv_path = f'./csv_data/{t_csv_file_name}.csv'
+
+    # Step 1: Load from CSV if parameters are None
+    if train_likelihoods_students is None or train_likelihoods_teachers is None:
+        s_df = pd.read_csv(s_csv_path)
+        t_df = pd.read_csv(t_csv_path)
+
+        required_columns = {'epoch', 'train_likelihoods', 'test_likelihoods', 'decodingST', 'decodingTS'}
+
+        if not required_columns.issubset(s_df.columns) or not required_columns.issubset(t_df.columns):
+            missing_s = required_columns - set(s_df.columns)
+            missing_t = required_columns - set(t_df.columns)
+            raise ValueError(f"Missing columns: {missing_s if missing_s else ''} {missing_t if missing_t else ''}")
+
+        df = pd.merge(s_df, t_df, on='epoch', suffixes=('_student', '_teacher'))
+        num_epochs = df['epoch'].nunique()
+        num_students = len(json.loads(df['train_likelihoods_student'].iloc[0]))
+        num_teachers = len(json.loads(df['train_likelihoods_teacher'].iloc[0]))
+
+        train_likelihoods_students = np.zeros((num_epochs, num_students, num_teachers))
+        test_likelihoods_students = np.zeros((num_epochs, num_students, num_teachers))
+        decodingST_students = np.zeros((num_epochs, num_students, num_teachers))
+        decodingTS_students = np.zeros((num_epochs, num_students, num_teachers))
+
+        train_likelihoods_teachers = np.zeros((num_epochs, num_teachers, num_teachers))
+        test_likelihoods_teachers = np.zeros((num_epochs, num_teachers, num_teachers))
+        decodingST_teachers = np.zeros((num_epochs, num_teachers, num_teachers))
+        decodingTS_teachers = np.zeros((num_epochs, num_teachers, num_teachers))
+
+        for _, row in df.iterrows():
+            e = int(row['epoch'])
+
+            train_likelihoods_students[e] = np.array(json.loads(row['train_likelihoods_student']))
+            test_likelihoods_students[e] = np.array(json.loads(row['test_likelihoods_student']))
+            decodingST_students[e] = np.array(json.loads(row['decodingST_student']))
+            decodingTS_students[e] = np.array(json.loads(row['decodingTS_student']))
+
+            train_likelihoods_teachers[e] = np.array(json.loads(row['train_likelihoods_teacher']))
+            test_likelihoods_teachers[e] = np.array(json.loads(row['test_likelihoods_teacher']))
+            decodingST_teachers[e] = np.array(json.loads(row['decodingST_teacher']))
+            decodingTS_teachers[e] = np.array(json.loads(row['decodingTS_teacher']))
+
+    # Step 2: Save to CSV if parameters are provided
+    else:
+        existing_s_files = [f for f in os.listdir('.') if f.startswith(f'{s_csv_file_name}_') and f.endswith('.csv')]
+        existing_t_files = [f for f in os.listdir('.') if f.startswith(f'{t_csv_file_name}_') and f.endswith('.csv')]
+
+        s_csv_path = f'./csv_data/{s_csv_file_name}_{len(existing_s_files) + 1}.csv'
+        t_csv_path = f'./csv_data/{t_csv_file_name}_{len(existing_t_files) + 1}.csv'
+
+        # Save students' data
+        s_data = {'epoch': [], 'train_likelihoods': [], 'test_likelihoods': [],
+                  'decodingST': [], 'decodingTS': []}
+        
+        # Save teachers' data
+        t_data = {'epoch': [], 'train_likelihoods': [], 'test_likelihoods': [],
+                  'decodingST': [], 'decodingTS': []}
+
+        for e in range(NUM_EPOCHS):
+            s_data['epoch'].append(e)
+            s_data['train_likelihoods'].append(json.dumps(train_likelihoods_students[e]))
+            s_data['test_likelihoods'].append(json.dumps(test_likelihoods_students[e]))
+            s_data['decodingST'].append(json.dumps(decodingST_students[e]))
+            s_data['decodingTS'].append(json.dumps(decodingTS_students[e]))
+
+            t_data['epoch'].append(e)
+            t_data['train_likelihoods'].append(json.dumps(train_likelihoods_teachers[e]))
+            t_data['test_likelihoods'].append(json.dumps(test_likelihoods_teachers[e]))
+            t_data['decodingST'].append(json.dumps(decodingST_teachers[e]))
+            t_data['decodingTS'].append(json.dumps(decodingTS_teachers[e]))
+
+        pd.DataFrame(s_data).to_csv(s_csv_path, index=False)
+        pd.DataFrame(t_data).to_csv(t_csv_path, index=False)
+
+    # Step 3: Plotting
+    epochs = range(len(train_likelihoods_students))
+    num_students = len(train_likelihoods_students[0])
+    num_teachers = len(train_likelihoods_teachers[0])
+
+    fig, axes = plt.subplots(3, 3, figsize=(12, 12), sharey='row')
+    titles = ['T0', 'T1', 'T2']
+    student_colors = plt.cm.viridis(np.linspace(0, 1, num_students))
+    teacher_colors = plt.cm.plasma(np.linspace(0, 1, num_teachers))
+
+    for t in range(num_teachers):
+        for s in range(num_students):
+            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods_students], label=f'Student {s}', color=student_colors[s], linestyle='-')
+        for s in range(num_teachers):
+            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods_teachers], label=f'Teacher {s}', color=teacher_colors[s], linestyle=':', marker='o')
+
+        axes[0, t].set_title(f'Likelihood - {titles[t]}')
+        axes[0, t].legend()
+
+        for s in range(num_students):
+            axes[1, t].plot(epochs, [d[s][t] for d in decodingST_students], label=f'Student {s}', color=student_colors[s], linestyle='-')
+        for s in range(num_teachers):
+            axes[1, t].plot(epochs, [d[s][t] for d in decodingST_teachers], label=f'Teacher {s}', color=teacher_colors[s], linestyle=':', marker='o')
+
+        axes[1, t].set_title(f'Decoding T{t} → S')
+        axes[1, t].legend()
+
+        for s in range(num_students):
+            axes[2, t].plot(epochs, [d[s][t] for d in decodingTS_students], label=f'Student {s}', color=student_colors[s], linestyle='-')
+        for s in range(num_teachers):
+            axes[2, t].plot(epochs, [d[s][t] for d in decodingTS_teachers], label=f'Teacher {s}', color=teacher_colors[s], linestyle=':', marker='o')
+
+        axes[2, t].set_title(f'Decoding S → T{t}')
+        axes[2, t].legend()
+
+    plt.tight_layout()
+    plt.savefig('./visualization/DecodingLikelihoodEpochs.png', dpi=300, bbox_inches='tight')
+    plt.show()
 
 
 'Visualize performances'

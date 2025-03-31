@@ -198,8 +198,8 @@ def dgen(teachers):
 #     return list(updated_students), list(losses)
 
 def fit_students(students, emissions):
-    fit_em  = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, num_epochs=ITER)
-    fit_sgd = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=ITER)
+    fit_em  = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=ITER)
+    fit_sgd = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, num_epochs=ITER)
     fit     = lambda hmm_class, params, props, emissions : (fit_sgd if SGD else fit_em)(hmm_class, params, props, emissions)
 
     trained_students = []
@@ -330,10 +330,14 @@ def likelihood(student_type, student_params, teacher, teacher_train_obs, test_ob
             ).reshape(-1,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
-    # print(f'Base liklihood: {base(teacher_train_obs, test_obs)}')
-    # print(f'Teacher liklihood: {ev(HMM, teacher, test_obs)}')
-    # print(f'Student liklihood: {ev(student_type, student_params, test_obs)} \n\n')
-    return float((ev(student_type, student_params, test_obs)-base(teacher_train_obs, test_obs))/(ev(HMM, teacher, test_obs)-base(teacher_train_obs, test_obs)))
+    print(f'Base liklihood: {base(teacher_train_obs, test_obs)}')
+    print(f'Teacher liklihood: {ev(HMM, teacher, test_obs)}')
+    print(f'Student liklihood: {ev(student_type, student_params, test_obs)} \n\n')
+
+    student_score   = ev(student_type, student_params, test_obs)
+    base_score      = base(teacher_train_obs, test_obs)
+    teacher_score   = ev(HMM, teacher, test_obs)
+    return float((student_score-base_score)/(teacher_score-base_score))
 
 
 
@@ -435,23 +439,26 @@ if __name__ == '__main__':
         
         teachers = dgen(teachers)
 
-        students = create_students(initial_probs, transition_matrix, emission_means, emissions_cov)
+        students = create_students(initial_probs, transition_matrix, emission_means, emissions_cov, ring=False)
 
         #First training on T0
         s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, trained_students = train(teachers, students, 0) 
         t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS, trained_teachers = train(teachers, teachers_copy, 0) 
 
+        filename = f'_like-decode_T0-fit_{NUM_EPOCHS}Epochs_{ITER}Iter_{NUM_TIMESTEPS}Timesteps_{NUM_TRIALS}Trials_SGD={SGD}'
         plot_decodingEpochs(s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, \
-                                t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS)
+                                t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS,
+                                s_csv_file_name = f's{filename}', t_csv_file_name = f't{filename}')
 
         
         for teacher_focus_i in range(1, len(teachers)): #Choose on which teacher we're training next
             s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, _ = train(teachers, trained_students, teacher_focus_i) 
             t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS, _ = train(teachers, trained_teachers, teacher_focus_i) 
 
-
+            filename = f'_T{teacher_focus_i}-fit_{NUM_EPOCHS}Epochs_{ITER}Iter_{NUM_TIMESTEPS}Timesteps_{NUM_TRIALS}Trials_SGD={SGD}'
             plot_decodingEpochs(s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, \
-                                t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS)
+                                t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS,
+                                s_csv_file_name = f's{filename}', t_csv_file_name = f't{filename}')
             
 
 
