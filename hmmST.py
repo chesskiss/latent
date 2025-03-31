@@ -139,12 +139,13 @@ def init_teachers(initial_probs, transition_matrix, emission_means, emissions_co
 
 
 'This will create students with 100% accuracy on liklihood (emissions), but different structure and hence, high decoding (error value)'
-def create_students(initial_probs, transition_matrix, emission_means, emissions_cov ):
+def create_students(initial_probs, transition_matrix, emission_means, emissions_cov, ring=True):
     students = []
     
     for n in range(1, STUDENTS_NUM+1): # n = number of rings
-        # student_params, props, hmm_type = add_ring(initial_probs, transition_matrix, emission_means, emissions_cov, ring_length=n)
-
+        if ring:
+            student_params, props, hmm_type = add_ring(initial_probs, transition_matrix, emission_means, emissions_cov, ring_length=n)
+            students.append([student_params, props, hmm_type])
         hmm_type = GaussianHMM(MAX_S_STATE, EMISSION_DIM) #TODO: Generalize for students w/ different num of states
         student_params, props = hmm_type.initialize(jr.PRNGKey(0))
         students.append([student_params, props, hmm_type])
@@ -169,10 +170,14 @@ def generate_data_from_model(model, params, key, NUM_TRIALS, NUM_TIMESTEPS):
 def dgen(teachers):
     dataset = []
 
-    gdata   = lambda params, key: generate_data_from_model(HMM, params, jr.PRNGKey(key), NUM_TRIALS, NUM_TIMESTEPS)
+    gdata_em    = lambda params, key: generate_data_from_model(HMM, params, jr.PRNGKey(key), NUM_TRIALS, NUM_TIMESTEPS)
+    gdata_sgd   = lambda params, key : vmap(partial(HMM.sample, params, num_timesteps=NUM_TIMESTEPS))(
+        jr.split(jr.PRNGKey(key), NUM_TRAIN_BATCHS))
+    gdata       = lambda params, key : (gdata_sgd if SGD else gdata_em)(params, key)
+
     for T in teachers:
-        _, T_emissions_train        = gdata(T, 1)
-        T_states, T_emissions_test  = gdata(T, 100)
+        _, T_emissions_train        = gdata(T, 42)
+        T_states, T_emissions_test  = gdata(T, 99)
 
         dataset.append([T, T_emissions_train, T_emissions_test])
 
@@ -193,7 +198,9 @@ def dgen(teachers):
 #     return list(updated_students), list(losses)
 
 def fit_students(students, emissions):
-    fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=ITER)
+    fit_em  = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, num_epochs=ITER)
+    fit_sgd = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions, num_iters=ITER)
+    fit     = lambda hmm_class, params, props, emissions : (fit_sgd if SGD else fit_em)(hmm_class, params, props, emissions)
 
     trained_students = []
     for student in students:
@@ -204,7 +211,7 @@ def fit_students(students, emissions):
 
 
 'Train/fit the HMMs'
-def train(teachers, students):  #can also try with .fit_em #TODO change name or split
+def train(teachers, students, teacher_focus_i): 
     # For fit_em use num_iters # optimizer=optax.adam(LEARNING_RATE). Look at ssm.py to find fit_sgd implementation
     teacher_fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions) 
 
@@ -228,13 +235,14 @@ def train(teachers, students):  #can also try with .fit_em #TODO change name or 
             epoch_decodingTS.append([0.0 for T, train, test in teachers])
             epoch_test_likelihoods.append([max(likelihood(hmm_student, params_student, T, train, test), 0) for T, train, test in teachers])
             epoch_train_likelihoods.append([max(likelihood(hmm_student, params_student, T, train, train), 0) for T, train, test in teachers])
+        
 
         decodingTS.append(epoch_decodingST)
         decodingST.append(epoch_decodingTS)
         test_likelihoods.append(epoch_test_likelihoods)
         train_likelihoods.append(epoch_train_likelihoods)
 
-        students = fit_students(students, teachers[0][1])
+        students = fit_students(students, teachers[teacher_focus_i][1])
 
 
     '''
@@ -248,7 +256,7 @@ def train(teachers, students):  #can also try with .fit_em #TODO change name or 
     '''
 
 
-    return train_likelihoods, test_likelihoods, decodingST, decodingTS
+    return train_likelihoods, test_likelihoods, decodingST, decodingTS, students
 
 
 
@@ -319,7 +327,7 @@ def likelihood(student_type, student_params, teacher, teacher_train_obs, test_ob
             train.reshape(-1, EMISSION_DIM)
             ).score_samples(
                 test.reshape(-1, EMISSION_DIM)
-            ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
+            ).reshape(-1,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
     # print(f'Base liklihood: {base(teacher_train_obs, test_obs)}')
@@ -429,13 +437,24 @@ if __name__ == '__main__':
 
         students = create_students(initial_probs, transition_matrix, emission_means, emissions_cov)
 
-        # likelihoods_r, decodingST, decodingTS = train(teachers, students)
-        train_likelihoods, test_likelihoods, decodingST, decodingTS = train(teachers, teachers_copy)
+        #First training on T0
+        s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, trained_students = train(teachers, students, 0) 
+        t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS, trained_teachers = train(teachers, teachers_copy, 0) 
 
-        for num, e in enumerate(train_likelihoods):
-            print(f'Epoch {num}')
-            for i, s in enumerate(e):
-                print(f'Student {i} : ', s)
+        plot_decodingEpochs(s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, \
+                                t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS)
+
+        
+        for teacher_focus_i in range(1, len(teachers)): #Choose on which teacher we're training next
+            s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, _ = train(teachers, trained_students, teacher_focus_i) 
+            t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS, _ = train(teachers, trained_teachers, teacher_focus_i) 
+
+
+            plot_decodingEpochs(s_train_likelihoods, s_test_likelihoods, s_decodingST, s_decodingTS, \
+                                t_train_likelihoods, t_test_likelihoods, t_decodingST, t_decodingTS)
+            
+
+
 
         # # students shape : [S0_minStates, S1_minStates, ... Sk_minStates, S0_minStates+1, S1_minStates+1, ...]
         # students = []
@@ -446,11 +465,11 @@ if __name__ == '__main__':
             # students_data = train(teachers, S, S_props, hmm_student) #OLD
             # students.extend([s, hmm_student] for s in students_data)
 
-
-        plot_decodingEpochs(train_likelihoods, test_likelihoods, decodingST, decodingTS)
-
     else:
-        plot_decodingEpochs(None, None, None, None)
+        plot_decodingEpochs_singleModelType(csv_file_name='s_decoding_data_1_20EpochsT0')
+        plot_decodingEpochs_singleModelType(csv_file_name='t_decoding_data_1_20EpochsT0')
+        for teacher_focus_i in range(len(3)): 
+            plot_decodingEpochs(s_csv_file_name=f's_decoding_data_{i}_{NUM_EPOCHS}Epochs',t_csv_file_name=f't_decoding_data_{i}_{NUM_EPOCHS}Epochs')
 
 
 
@@ -467,4 +486,5 @@ if __name__ == '__main__':
 
     'Plot emissions vs. time with background colored by true state'
     # plot_gaussian_hmm_data(HMM, T0, T0_emissions_test[0], T0_states[0])
+
 
