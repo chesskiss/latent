@@ -69,6 +69,19 @@ STUDENTS_NUM        = 5
 
 
 
+import jax.numpy as jnp
+import jax
+
+def backup_hmm(params, props, filename="hmm_backup_jax.pkl"):
+    jax.tree_util.tree_map(lambda x: jnp.save(filename, x), (params, props))
+    print("Backup completed.")
+
+def restore_hmm(filename="hmm_backup_jax.pkl"):
+    params, props = jax.tree_util.tree_map(lambda x: jnp.load(filename, allow_pickle=True), (None, None))
+    print("Restoration completed.")
+    return params, props
+
+
 if __name__ == '__main__':
     'Initialize HMMs'
     initial_probs, transition_matrix, emission_means, emissions_cov = initial()
@@ -79,9 +92,12 @@ if __name__ == '__main__':
                                     emission_covariances=emissions_cov)
 
 
-    student_hmm = GaussianHMM(TRUE_NUM_STATES+7, EMISSION_DIM)
-    S, S_props = zip(*[student_hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
+    student_hmm = GaussianHMM(MAX_S_STATE, EMISSION_DIM)
+    T, T0_props = student_hmm.initialize(jr.PRNGKey(10))
+    S, S_props = student_hmm.initialize(jr.PRNGKey(0))
+    # S, S_props = zip(*[student_hmm.initialize(jr.PRNGKey(key)) for key in range(STUDENTS_NUM)])
     # S, S_props = ([deepcopy(T0) , deepcopy(T0)]) , ([T0_props, T0_props])
+    # S, S_props, student_hmm = add_ring(initial_probs, transition_matrix, emission_means, emissions_cov)
 
 
     'Baseline option 1'
@@ -95,7 +111,7 @@ if __name__ == '__main__':
                 test.reshape(-1, EMISSION_DIM)
             ).reshape(NUM_TRIALS,NUM_TIMESTEPS).sum(axis=1).mean(axis=0)
 
-
+    
     'Generate datasets'
     gdata   = lambda params, key: generate_data_from_model(HMM, params, jr.PRNGKey(key), NUM_TRIALS, NUM_TIMESTEPS)
     _, T0_emissions_train           = gdata(T0, 1)
@@ -103,28 +119,57 @@ if __name__ == '__main__':
 
 
     'Train'
-    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions) for param, prop in zip(*[params, props])])
-    fit = lambda hmm_class, params, props, emissions : hmm_class.fit_em(params, props, emissions)
+    fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_sgd(param, prop, emissions) for param, prop in zip(*[params, props])])
+    fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions)
 
     evaluate_func = lambda hmm_class : vmap(hmm_class.marginal_log_prob, [None, 0], 0) #evaluate
     ev = lambda hmm, features, test: (evaluate_func(hmm)(features, test)).mean() #eval_true
 
+
+    like = lambda model : float((ev(student_hmm, model, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test)))
+    like = lambda model : float(ev(student_hmm, model, T0_emissions_test))
+    liketrain = lambda model : float((ev(student_hmm, model, T0_emissions_train)-base(T0_emissions_train, T0_emissions_train))/(ev(HMM, T0, T0_emissions_train)-base(T0_emissions_train, T0_emissions_train)))
+    liketrain = lambda model : float(ev(student_hmm, model, T0_emissions_train))
+    
+
+    # print(f'iteration test \n', like(S))
+    # print(f'iteration train \n', liketrain(S))
+
+    
+
+
+
     # S0, _   = fit(student_hmm, S, S_props, T0_emissions_train)
     # S00, _  = fit(student_hmm, S0, S_props, T0_emissions_train)
-    print(ev(HMM, T0, T0_emissions_train))
-    print(ev(HMM, T0, T0_emissions_test))
-    print('after')
-    T0, _   = fit(HMM, deepcopy(T0), T0_props, T0_emissions_train)
-    print(ev(HMM, T0, T0_emissions_train))
-    print(ev(HMM, T0, T0_emissions_test))
+
+
 
     # print(float((ev(student_hmm, S[0], T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
     # print(float((ev(student_hmm, S0[0], T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
     
 
+    for i in range(1):
+    #     maxtrain = -np.inf
+    #     maxtest = -np.inf
+    #     # for model in S:
+    #     #     l = like(model)
+    #     #     lt = liketrain(model)
+    #     #     maxtest = l if l > maxtest else maxtest
+    #     #     maxtrain = lt if lt > maxtrain else maxtrain
+    #     print(f'iteration {i} test \n', maxtest)
+    #     print(f'iteration {i} train \n', maxtrain)
+    #     # print(f'iteration {i} test \n', like(S00))
+    #     # print(f'iteration {i} train \n', liketrain(S00))
+        print('train = ', ev(student_hmm, S, T0_emissions_train))
+        print('test = ', ev(student_hmm, S, T0_emissions_test))
+        S, _  = fit(student_hmm, S, S_props, T0_emissions_train)
 
-    # for i in range(NUM_EPOCHS):
 
-    #     print('\n', float((ev(student_hmm, S00[0], T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
+    backup_hmm(S, S_props, filename="test.pkl")
 
-    #     S00, _  = fit(student_hmm, S00, S_props, T0_emissions_train)
+    params, props = restore_hmm(filename="test.pkl")
+
+    print(S)
+    print(S_props)
+    # print('train after backup = ', ev(student_hmm, params, T0_emissions_train))
+    # print('test after backuo = ', ev(student_hmm, params, T0_emissions_test))

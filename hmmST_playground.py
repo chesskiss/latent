@@ -100,9 +100,9 @@ if __name__ == '__main__':
     fit = lambda hmm_class, params, props, emissions : zip(*[hmm_class.fit_em(param, prop, emissions) for param, prop in zip(*[params, props])])
     fit1 = lambda hmm_class, param, prop, emissions : hmm_class.fit_em(param, prop, emissions)
 
-    # S0, _   = fit(student_hmm, S, S_props, T0_emissions_train)
-    # S00, _   = fit(student_hmm, S0, S_props, T0_emissions_train)
-    T00, _  = fit1(HMM, T0, T0_props, T0_emissions_train)
+    S0, _   = fit(student_hmm, S, S_props, T0_emissions_train)
+    S00, _   = fit(student_hmm, S0, S_props, T0_emissions_train)
+    # T00, _  = fit1(HMM, T0, T0_props, T0_emissions_train)
 
 
     # T00, _  = fit1(HMM, T0, T0_props, T0_emissions_train)
@@ -112,6 +112,3 @@ if __name__ == '__main__':
 
     # print(float((ev(student_hmm, S[0], T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
     # print(float((ev(student_hmm, S0[0], T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
-    print(float((ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
-    print(float((ev(HMM, T00, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))/(ev(HMM, T0, T0_emissions_test)-base(T0_emissions_train, T0_emissions_test))))
-    print(float((ev(HMM, T00, T0_emissions_train)-base(T0_emissions_train, T0_emissions_train))/(ev(HMM, T0, T0_emissions_train)-base(T0_emissions_train, T0_emissions_train))))

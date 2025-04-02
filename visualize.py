@@ -119,13 +119,13 @@ def plot_decodingEpochs_singleModelType(train_likelihoods=None, test_likelihoods
         axes[2, t].legend()
 
     plt.tight_layout()
-    plt.savefig('./visualization/DecodingLikelihoodEpochs.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'./visualization/{csv_file_name}.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
 
 'Plot with X = epochs, Y= decoding per teacher and likelihood for both teachers AND students'
-def plot_decodingEpochs(train_likelihoods_students=None, test_likelihoods_students=None, decodingST_students=None, decodingTS_students=None,
+def plot_decodingEpochs(focus_teacher_i, train_likelihoods_students=None, test_likelihoods_students=None, decodingST_students=None, decodingTS_students=None,
                         train_likelihoods_teachers=None, test_likelihoods_teachers=None, decodingST_teachers=None, decodingTS_teachers=None,
                         s_csv_file_name='s_decoding_data', t_csv_file_name='t_decoding_data'):
     
@@ -240,8 +240,30 @@ def plot_decodingEpochs(train_likelihoods_students=None, test_likelihoods_studen
         axes[2, t].legend()
 
     plt.tight_layout()
-    plt.savefig('./visualization/DecodingLikelihoodEpochs.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'./visualization/like-decode_T{focus_teacher_i}-fit_{NUM_EPOCHS}Epochs_{ITER}Iter_{NUM_TIMESTEPS}Timesteps_{NUM_TRIALS}Trials_SGD={SGD}', dpi=300, bbox_inches='tight')
     plt.show()
+
+
+
+def plot_gaussian_hmm(hmm, params, emissions, states,  title="Emission Distributions", alpha=0.25):
+    lim = 1.1 * abs(emissions).max()
+    XX, YY = jnp.meshgrid(jnp.linspace(-lim, lim, 100), jnp.linspace(-lim, lim, 100))
+    grid = jnp.column_stack((XX.ravel(), YY.ravel()))
+
+    plt.figure()
+    for k in range(hmm.num_states):
+        lls = hmm.emission_distribution(params, k).log_prob(grid)
+        plt.contour(XX, YY, jnp.exp(lls).reshape(XX.shape), cmap=white_to_color_cmap(COLORS[k]))
+        plt.plot(emissions[states == k, 0], emissions[states == k, 1], "o", mfc=COLORS[k], mec="none", ms=3, alpha=alpha)
+
+    plt.plot(emissions[:, 0], emissions[:, 1], "-k", lw=1, alpha=alpha)
+    plt.xlabel("$y_1$")
+    plt.ylabel("$y_2$")
+    plt.title(title)
+    plt.gca().set_aspect(1.0)
+    plt.tight_layout()
+    plt.show()  # Ensure the plot is displayed
+
 
 
 'Visualize performances'
@@ -380,6 +402,7 @@ def plot_gaussian_hmm(hmm, params, emissions, states,  title="Emission Distribut
     grid = jnp.column_stack((XX.ravel(), YY.ravel()))
 
     plt.figure()
+    print(grid)
     for k in range(hmm.num_states):
         lls = hmm.emission_distribution(params, k).log_prob(grid)
         plt.contour(XX, YY, jnp.exp(lls).reshape(XX.shape), cmap=white_to_color_cmap(COLORS[k]))

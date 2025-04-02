@@ -109,7 +109,8 @@ f = vmap(partial(hmm.sample, true_params, num_timesteps=num_timesteps))
 train_true_states, train_emissions = f(jr.split(train_key, num_train_batches))
 test_true_states,  test_emissions  = f(jr.split(test_key, num_test_batches))
 
-
+print('emissions shape = ', train_emissions[0][0].shape)
+print('states shape = ', train_true_states[0].shape)
 # Plot emissions and true_states in the emissions plane
 plot_gaussian_hmm(hmm, true_params, train_emissions[0], train_true_states[0], 
                   title="True HMM emission distribution")
