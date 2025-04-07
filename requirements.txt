@@ -5,3 +5,6 @@ pandas
 seaborn
 numpy==1.26.4
 hmmlearn
+jax==0.4.26
+jaxlib==0.4.26
+networkx

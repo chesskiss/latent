@@ -1,4 +1,3 @@
-from dynamax.hidden_markov_model import GaussianHMM
 from functools import partial
 from jax import vmap
 import jax.numpy as jnp
@@ -9,7 +8,7 @@ import optax
 
 data_sample = lambda model, params, key:  model.sample(params, jr.PRNGKey(key), NUM_TIMESTEPS)
 
-fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, optimizer=optax.adam(LEARNING_RATE))
+fit = lambda hmm_class, params, props, emissions : hmm_class.fit_sgd(params, props, emissions, optimizer=optax.sgd(learning_rate=1e-3))
 
 def evaluate_model(hmm, model, test_data):
     true_loss = vmap(partial(hmm.marginal_log_prob, model))(test_data).sum()
@@ -35,23 +34,32 @@ _, test_data    = data_sample(hmm, T, 1)
 
 # NUM_TRAIN_BATCHS = 5
 # NUM_TIMESTEPS = 10
-states_num, train_data = vmap(partial(hmm.sample, T, num_timesteps=NUM_TIMESTEPS))(
-        jr.split(jr.PRNGKey(42), NUM_TRAIN_BATCHS))
 
-_, test_data = \
-    vmap(partial(hmm.sample, T, num_timesteps=NUM_TIMESTEPS))(
-        jr.split(jr.PRNGKey(99), 1))
+# states_num, train_data = vmap(partial(hmm.sample, T, num_timesteps=NUM_TIMESTEPS))(
+#         jr.split(jr.PRNGKey(42), NUM_TRAIN_BATCHS))
 
-# print(train_data.shape)
-# print(test_data.shape)
+# _, test_data = \
+#     vmap(partial(hmm.sample, T, num_timesteps=NUM_TIMESTEPS))(
+#         jr.split(jr.PRNGKey(99), 1))
 
 
 
+
+opt = None
 for i in range(10):
-    print(f'iteration {i}, train: ', ev(hmm, S, train_data))
-    print(f'iteration {i}, test: ', ev(hmm, S, test_data))
-    print(f'iteration {i}, likelihood: ', likelihood(hmm, S, T, train_data, test_data))
+    # print(f'iteration {i}, train: ', ev(hmm, S, train_data))
+    # print(f'iteration {i}, test: ', ev(hmm, S, test_data))
+    print(f'iteration {i}, likelihood: ', likelihood(hmm, S, T, train_data, train_data))
 
     # print(f'iteration {i}, train: ', evaluate_model(hmm, T, test_data))
     # print(f'iteration {i}, test: ', loss())
-    S, _ = fit(hmm, S, S_props, train_data)
+    # S, _ = fit(hmm, S, S_props, train_data)
+    sgd_key = jr.PRNGKey(0)
+    S, opt, sgd_losses = hmm.fit_sgd(S, 
+                                        S_props, 
+                                        train_data, 
+                                        # optimizer=optax.adam(learning_rate=0.025, momentum=0.95),
+                                        batch_size=2, 
+                                        num_epochs=500,
+                                        init_opt_state = opt,
+                                        key=sgd_key)

@@ -98,7 +98,7 @@ def plot_decodingEpochs_singleModelType(train_likelihoods=None, test_likelihoods
         axes[0, t].set_title(f'Likelihood - {titles[t]}')
         axes[0, t].set_xlabel('Epochs')
         axes[0, t].set_ylabel('Likelihood')
-        axes[0, t].legend()
+        axes[0, 0].legend()
 
     # Plot decoding T -> S (row 2)
     for t in range(num_teachers):
@@ -107,7 +107,7 @@ def plot_decodingEpochs_singleModelType(train_likelihoods=None, test_likelihoods
         axes[1, t].set_title(f'Decoding T{t} → S')
         axes[1, t].set_xlabel('Epochs')
         axes[1, t].set_ylabel('Error')
-        axes[1, t].legend()
+        axes[1, 0].legend()
 
     # Plot decoding S -> T (row 3)
     for t in range(num_teachers):
@@ -116,7 +116,7 @@ def plot_decodingEpochs_singleModelType(train_likelihoods=None, test_likelihoods
         axes[2, t].set_title(f'Decoding S → T{t}')
         axes[2, t].set_xlabel('Epochs')
         axes[2, t].set_ylabel('Error')
-        axes[2, t].legend()
+        axes[2, 0].legend()
 
     plt.tight_layout()
     plt.savefig(f'./visualization/{csv_file_name}.png', dpi=300, bbox_inches='tight')
@@ -125,12 +125,13 @@ def plot_decodingEpochs_singleModelType(train_likelihoods=None, test_likelihoods
 
 
 'Plot with X = epochs, Y= decoding per teacher and likelihood for both teachers AND students'
-def plot_decodingEpochs(focus_teacher_i, train_likelihoods_students=None, test_likelihoods_students=None, decodingST_students=None, decodingTS_students=None,
+def plot_decodingEpochs(train_likelihoods_students=None, test_likelihoods_students=None, decodingST_students=None, decodingTS_students=None,
                         train_likelihoods_teachers=None, test_likelihoods_teachers=None, decodingST_teachers=None, decodingTS_teachers=None,
-                        s_csv_file_name='s_decoding_data', t_csv_file_name='t_decoding_data'):
-    
-    s_csv_path = f'./csv_data/{s_csv_file_name}.csv'
-    t_csv_path = f'./csv_data/{t_csv_file_name}.csv'
+                        csv_file_param=f'?-fit_{NUM_EPOCHS}Epochs_{ITER}Iter_{NUM_TIMESTEPS}Timesteps_{NUM_TRIALS}Trials_SGD={SGD}'):
+    s_csv_file_name = f's_{csv_file_param}'
+    t_csv_file_name = f't_{csv_file_param}'
+    s_csv_path      = f'./csv_data/{s_csv_file_name}.csv'
+    t_csv_path      = f'./csv_data/{t_csv_file_name}.csv'
 
     # Step 1: Load from CSV if parameters are None
     if train_likelihoods_students is None or train_likelihoods_teachers is None:
@@ -216,12 +217,12 @@ def plot_decodingEpochs(focus_teacher_i, train_likelihoods_students=None, test_l
 
     for t in range(num_teachers):
         for s in range(num_students):
-            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods_students], label=f'Student {s}', color=student_colors[s], linestyle='-')
+            axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods_students], label=f'Random model {s//2}' if s%2>0 else f'Artificial model ringx{s//2+1}', color=student_colors[s], linestyle='-')
         for s in range(num_teachers):
             axes[0, t].plot(epochs, [l[s][t] for l in test_likelihoods_teachers], label=f'Teacher {s}', color=teacher_colors[s], linestyle=':', marker='o')
 
         axes[0, t].set_title(f'Likelihood - {titles[t]}')
-        axes[0, t].legend()
+        axes[0, 0].legend()
 
         for s in range(num_students):
             axes[1, t].plot(epochs, [d[s][t] for d in decodingST_students], label=f'Student {s}', color=student_colors[s], linestyle='-')
@@ -229,7 +230,7 @@ def plot_decodingEpochs(focus_teacher_i, train_likelihoods_students=None, test_l
             axes[1, t].plot(epochs, [d[s][t] for d in decodingST_teachers], label=f'Teacher {s}', color=teacher_colors[s], linestyle=':', marker='o')
 
         axes[1, t].set_title(f'Decoding T{t} → S')
-        axes[1, t].legend()
+
 
         for s in range(num_students):
             axes[2, t].plot(epochs, [d[s][t] for d in decodingTS_students], label=f'Student {s}', color=student_colors[s], linestyle='-')
@@ -237,10 +238,10 @@ def plot_decodingEpochs(focus_teacher_i, train_likelihoods_students=None, test_l
             axes[2, t].plot(epochs, [d[s][t] for d in decodingTS_teachers], label=f'Teacher {s}', color=teacher_colors[s], linestyle=':', marker='o')
 
         axes[2, t].set_title(f'Decoding S → T{t}')
-        axes[2, t].legend()
+
 
     plt.tight_layout()
-    plt.savefig(f'./visualization/like-decode_T{focus_teacher_i}-fit_{NUM_EPOCHS}Epochs_{ITER}Iter_{NUM_TIMESTEPS}Timesteps_{NUM_TRIALS}Trials_SGD={SGD}', dpi=300, bbox_inches='tight')
+    plt.savefig(f'./visualization/{csv_file_param}.png', dpi=300, bbox_inches='tight')
     plt.show()
 
 
