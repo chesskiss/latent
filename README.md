@@ -18,7 +18,9 @@ I. Add more:
 > perturbed teachers
 > different randomly initalized teachers
 
-II. Change run parameters on run on multi-teacher run (different teachers each), to find variability
+II. Change run parameters on run on:
+> multi-teacher run (different teachers each), to find variability
+> 1 teacher, after being trained on another, and check what happens BEFORE convergence
 
 III. Try with few shots instead of decoding? 
 
